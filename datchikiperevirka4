@@ -1,0 +1,101 @@
+#include <Arduino.h>
+
+// --- ПІНИ ---
+const int PIN_S1 = 34;
+const int PIN_S2 = 36;
+const int PIN_S3 = 35; // VP
+const int PIN_S4 = 39; // VN (для тесту)
+
+// Змінні для математики (long, щоб сума не переповнилась)
+unsigned long sum1 = 0;
+unsigned long sum2 = 0;
+unsigned long sum3 = 0;
+unsigned long sum4 = 0;
+unsigned long sampleCount = 0;
+
+unsigned long startTime = 0;
+const unsigned long DURATION = 300000; // 5 хвилин (300 000 мс)
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Налаштування пінів на вхід
+  pinMode(PIN_S1, INPUT);
+  pinMode(PIN_S2, INPUT);
+  pinMode(PIN_S3, INPUT);
+  pinMode(PIN_S4, INPUT);
+
+  Serial.println("--- КАЛІБРУВАННЯ РОЗПОЧАТО ---");
+  Serial.println("Формат виводу: [ФАКТИЧНЕ / СЕРЕДНЄ]");
+  Serial.println("Чекайте 5 хвилин...");
+  Serial.println("");
+  
+  startTime = millis(); // Засікаємо час старту
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+  unsigned long elapsedTime = currentTime - startTime;
+
+  // Якщо час ще не вийшов (менше 5 хвилин)
+  if (elapsedTime < DURATION) {
+    
+    // 1. Читаємо поточні (МИТТЄВІ) значення
+    int raw1 = analogRead(PIN_S1);
+    int raw2 = analogRead(PIN_S2);
+    int raw3 = analogRead(PIN_S3);
+    int raw4 = analogRead(PIN_S4);
+
+    // 2. Додаємо до загальної суми (для середнього)
+    sum1 += raw1;
+    sum2 += raw2;
+    sum3 += raw3;
+    sum4 += raw4;
+    sampleCount++; // Лічильник замірів +1
+
+    // 3. Рахуємо середнє на даний момент
+    int avg1 = sum1 / sampleCount;
+    int avg2 = sum2 / sampleCount;
+    int avg3 = sum3 / sampleCount;
+    int avg4 = sum4 / sampleCount;
+
+    // 4. Форматуємо час
+    int secondsPassed = elapsedTime / 1000;
+    int mins = secondsPassed / 60;
+    int secs = secondsPassed % 60;
+
+    // 5. Виводимо в термінал: [Час] Z1: Факт/Середнє | ...
+    Serial.printf("[%d:%02d] Z1: %d/%d | Z2: %d/%d | Z3: %d/%d | Z4: %d/%d \n", 
+                  mins, secs, 
+                  raw1, avg1, 
+                  raw2, avg2, 
+                  raw3, avg3, 
+                  raw4, avg4);
+
+    delay(1000); // Чекаємо 1 секунду
+
+  } else {
+    // КОЛИ ПРОЙШЛО 5 ХВИЛИН - ФІНАЛ
+    Serial.println("");
+    Serial.println("========================================");
+    Serial.println("       КАЛІБРУВАННЯ ЗАВЕРШЕНО!          ");
+    Serial.println("========================================");
+    
+    int finalAvg1 = sum1 / sampleCount;
+    int finalAvg2 = sum2 / sampleCount;
+    int finalAvg3 = sum3 / sampleCount;
+    int finalAvg4 = sum4 / sampleCount;
+    
+    Serial.println("ЗАПИШИ ЦІ ЧИСЛА (Це твої еталони):");
+    Serial.printf("Зона 1: %d \n", finalAvg1);
+    Serial.printf("Зона 2: %d \n", finalAvg2);
+    Serial.printf("Зона 3: %d \n", finalAvg3);
+    Serial.printf("Зона 4 (пустий): %d \n", finalAvg4);
+    Serial.println("========================================");
+
+    // Стоп
+    while(true) {
+      delay(1000);
+    }
+  }
+}

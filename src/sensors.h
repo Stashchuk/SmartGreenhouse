@@ -1,0 +1,12 @@
+#pragma once
+#include <Arduino.h>
+
+void setupSensors();
+void updateSensorsLoop();
+void updateLcdLoop();
+int getPercent(int i);
+int getAverageMoisture(int i);
+void getAverageClimate(float &t, float &h, float &p);
+void resetSensorAverages();
+bool isBmeWorking();
+void lcdPrintStatus(String status); // Для виводу WiFi статусу при старті
