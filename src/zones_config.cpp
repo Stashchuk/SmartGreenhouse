@@ -13,6 +13,6 @@ Zone zones[NUM_ZONES] = {
   // Name           Sens Relay Min Max  Dry   Wet     Water  Soak    Topic
   {"Hamedoreya",    34,  16,   40, 80,  3391, 1073,   60000, 60000,  5}, 
   {"Happiness 1",   35,  17,   40, 60,  3377, 1065,   60000, 60000,  6}, 
-  {"Happiness 2",   36,  18,   40, 60,  3380, 1057,   60000, 60000,  7}, 
+  {"Happiness 2",   36,  18,   60, 80,  3380, 1057,   60000, 60000,  7}, 
   {"Happiness 3",   39,  19,   40, 60,  3405, 1133,   60000, 60000,  8}  
 };

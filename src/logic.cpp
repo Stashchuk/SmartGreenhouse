@@ -44,7 +44,8 @@ void updateWateringLogic() {
   bool isMechanismBusy = false;
   for (int j = 0; j < NUM_ZONES; j++) {
     if (zoneStates[j] == STATE_OPENING || zoneStates[j] == STATE_CLOSING) {
-      isMechanismBusy = true; break; 
+      isMechanismBusy = true; 
+      break; 
     }
   }
   
@@ -56,14 +57,24 @@ void updateWateringLogic() {
     switch (zoneStates[i]) {
       case STATE_IDLE:
         if (moisture < zones[i].min) {
-          if (verifyTimers[i] == 0) verifyTimers[i] = currentMillis; 
+          if (verifyTimers[i] == 0) {
+            verifyTimers[i] = currentMillis; 
+            Serial.printf("Z%d: Start verification. Moisture: %d%%\n", i+1, moisture);
+          } 
           else if (currentMillis - verifyTimers[i] >= SENSOR_VERIFY_TIME) {
+             // Час перевірки вийшов, переходимо в чергу
              verifyTimers[i] = 0; 
              zoneStates[i] = STATE_WAITING; 
+             Serial.printf("Z%d: Verification passed! Moving to QUEUE.\n", i+1);
              sendTelegramMessage(zones[i].topicID, "⚠️ <b>Критично сухо!</b> (" + String(moisture) + "%)\nПочинаю цикл поливу...");
           }
-        } else {
-          if (verifyTimers[i] > 0) verifyTimers[i] = 0; 
+        } 
+        else if (moisture >= zones[i].min + 5) { 
+          // Гістерезис: скидаємо таймер тільки якщо вологість реально виросла
+          if (verifyTimers[i] > 0) {
+            verifyTimers[i] = 0; 
+            Serial.printf("Z%d: Moisture stabilized at %d%%. Timer reset.\n", i+1, moisture);
+          }
         }
         break;
 
@@ -72,8 +83,15 @@ void updateWateringLogic() {
            digitalWrite(zones[i].relayPin, LOW); 
            zoneStates[i] = STATE_OPENING;
            zoneTimers[i] = currentMillis;
-           isMechanismBusy = true; 
+           isMechanismBusy = true; // Захоплюємо механізм
            sendTelegramMessage(zones[i].topicID, "⚙️ <b>Відкриваю клапан...</b>");
+        } else {
+           // Логування причини очікування раз на 10 сек
+           static unsigned long lastWaitLog = 0;
+           if (currentMillis - lastWaitLog > 10000) {
+             Serial.printf("Z%d in QUEUE: MechBusy:%d, QueueLocked:%d\n", i+1, isMechanismBusy, isQueueLocked);
+             lastWaitLog = currentMillis;
+           }
         }
         break;
 
@@ -122,6 +140,7 @@ void updateWateringLogic() {
     }
   }
 
+  // Керування насосом (Low level trigger - LOW вмикає)
   if (isPumpNeeded) digitalWrite(PUMP_PIN, LOW);
   else digitalWrite(PUMP_PIN, HIGH);
 }
