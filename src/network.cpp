@@ -156,22 +156,28 @@ bool isAdmin(String id) {
   return false;
 }
 
-// 👇 НОВА ДОПОМІЖНА ФУНКЦІЯ ДЛЯ ГОЛОВНОГО МЕНЮ
+// 👇 ОНОВЛЕНА ФУНКЦІЯ ДЛЯ ГОЛОВНОГО МЕНЮ (Приховує кнопки в Авто)
 void gotoMainMenu(String chat_id) {
   currentState = IDLE;
   targetZone = -1;
   
   String keyboardJson = "[";
-  for (int i = 0; i < NUM_ZONES; i++) {
-    keyboardJson += "[{ \"text\": \"▶️ " + String(zones[i].name) + "\", \"callback_data\": \"on_" + String(i) + "\" },";
-    keyboardJson += "{ \"text\": \"⏹\", \"callback_data\": \"off_" + String(i) + "\" }],"; 
+  
+  // Кнопки поливу показуємо ТІЛЬКИ в ручному режимі
+  if (currentSystemMode == MODE_MANUAL) {
+    for (int i = 0; i < NUM_ZONES; i++) {
+      keyboardJson += "[{ \"text\": \"▶️ " + String(zones[i].name) + "\", \"callback_data\": \"on_" + String(i) + "\" },";
+      keyboardJson += "{ \"text\": \"⏹\", \"callback_data\": \"off_" + String(i) + "\" }],"; 
+    }
   }
+
   keyboardJson += "[{ \"text\": \"📊 СТАТУС\", \"callback_data\": \"status\" },";
   keyboardJson += "{ \"text\": \"⚙️ НАЛАШТУВАННЯ\", \"callback_data\": \"settings_main\" }],";
   keyboardJson += "[{ \"text\": \"🚨 СТОП ВСЕ\", \"callback_data\": \"stop_all\" }]";
   keyboardJson += "]";
   
-  bot.sendMessageWithInlineKeyboard(chat_id, "🎛 <b>Головне меню:</b>", "HTML", keyboardJson);
+  String modeName = (currentSystemMode == MODE_AUTO) ? "🤖 АВТОМАТИКА" : "👤 РУЧНИЙ";
+  bot.sendMessageWithInlineKeyboard(chat_id, "🎛 <b>Меню (" + modeName + "):</b>", "HTML", keyboardJson);
 }
 
 // 🛠 ОНОВЛЕНА ОБРОБКА ПОВІДОМЛЕНЬ
@@ -227,9 +233,13 @@ void handleMessages(int numNewMessages) {
          bot.sendMessage(chat_id, "🛑 <b>ВСІ ЗОНИ ЗУПИНЕНО!</b>", "HTML");
        }
        else if (query_data.startsWith("on_")) {
-         int z = query_data.substring(3).toInt();
-         forceZoneStart(z);
-         bot.sendMessage(chat_id, "▶️ Запуск: <b>" + String(zones[z].name) + "</b>", "HTML");
+         if (currentSystemMode == MODE_MANUAL) {
+            int z = query_data.substring(3).toInt();
+            forceZoneStart(z);
+            bot.sendMessage(chat_id, "▶️ Ручний запуск: <b>" + String(zones[z].name) + "</b>", "HTML");
+         } else {
+            bot.sendMessage(chat_id, "❌ Помилка! Увімкніть РУЧНИЙ РЕЖИМ для керування.", "");
+         }
        }
        else if (query_data.startsWith("off_")) {
          int z = query_data.substring(4).toInt();
@@ -239,12 +249,23 @@ void handleMessages(int numNewMessages) {
        // МЕНЮ НАЛАШТУВАНЬ
        else if (query_data == "settings_main") {
          String keyboardJson = "[";
+         // Перемикач режимів
+         String modeBtnText = (currentSystemMode == MODE_AUTO) ? "🔄 Перейти в РУЧНИЙ" : "🔄 Перейти в АВТО";
+         keyboardJson += "[{\"text\": \"" + modeBtnText + "\", \"callback_data\": \"toggle_mode\"}],";
+         
          for (int j = 0; j < NUM_ZONES; j++) {
            keyboardJson += "[{\"text\": \"⚙️ " + String(zones[j].name) + "\", \"callback_data\": \"edit_z" + String(j) + "\"}],";
          }
          keyboardJson += "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"main_menu\"}]";
          keyboardJson += "]";
-         bot.sendMessageWithInlineKeyboard(chat_id, "Оберіть зону для редагування:", "HTML", keyboardJson);
+         bot.sendMessageWithInlineKeyboard(chat_id, "Налаштування системи:", "HTML", keyboardJson);
+       }
+       else if (query_data == "toggle_mode") {
+          currentSystemMode = (currentSystemMode == MODE_AUTO) ? MODE_MANUAL : MODE_AUTO;
+          saveSettings();
+          String modeMsg = (currentSystemMode == MODE_AUTO) ? "✅ Система переведена в АВТО режим." : "⚠️ Система в РУЧНОМУ режимі. Автополив вимкнено!";
+          bot.sendMessage(chat_id, modeMsg, "");
+          gotoMainMenu(chat_id);
        }
        else if (query_data.startsWith("edit_z")) {
          targetZone = query_data.substring(6).toInt();

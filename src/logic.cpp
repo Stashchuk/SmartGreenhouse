@@ -8,6 +8,9 @@ unsigned long zoneTimers[NUM_ZONES];
 unsigned long verifyTimers[NUM_ZONES]; 
 unsigned long nextAllowedActionTime = 0; 
 
+// Змінна для відстеження часу останнього нагадування
+unsigned long lastManualNotify[NUM_ZONES] = {0, 0, 0, 0};
+
 void setupLogic() {
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, HIGH); 
@@ -37,10 +40,32 @@ String getZoneStatusText(int i, int currentMoisture) {
     return "✅ (Норма)";
 }
 
+// Функція перевірки довгих поливів у ручному режимі
+void checkManualAlerts() {
+  if (currentSystemMode == MODE_MANUAL) {
+    unsigned long currentMillis = millis();
+    for (int i = 0; i < NUM_ZONES; i++) {
+      if (zoneStates[i] == STATE_WATERING) {
+        unsigned long activeTimeMin = (currentMillis - zoneTimers[i]) / 60000;
+        // Якщо працює більше 30 хв і ми ще не нагадували про цей 30-хвилинний відрізок
+        if (activeTimeMin >= 30 && (activeTimeMin / 30) > (lastManualNotify[i] / 30)) {
+           lastManualNotify[i] = activeTimeMin;
+           sendTelegramMessage(TOPIC_MAIN, "⚠️ <b>УВАГА!</b>\nЗона <b>" + String(zones[i].name) + "</b> поливає вже " + String(activeTimeMin) + " хв!\nНе забудьте вимкнути.");
+        }
+      } else {
+        lastManualNotify[i] = 0; // Скидаємо, якщо не поливає
+      }
+    }
+  }
+}
+
 void updateWateringLogic() {
   unsigned long currentMillis = millis();
   bool isPumpNeeded = false; 
   
+  // Викликаємо нагадування
+  checkManualAlerts();
+
   bool isMechanismBusy = false;
   for (int j = 0; j < NUM_ZONES; j++) {
     if (zoneStates[j] == STATE_OPENING || zoneStates[j] == STATE_CLOSING) {
@@ -56,25 +81,20 @@ void updateWateringLogic() {
 
     switch (zoneStates[i]) {
       case STATE_IDLE:
-        if (moisture < zones[i].min) {
+        // 👇 ДОДАНО ЗАХИСТ: Автоматика працює тільки в MODE_AUTO
+        if (currentSystemMode == MODE_AUTO && moisture < zones[i].min) {
           if (verifyTimers[i] == 0) {
             verifyTimers[i] = currentMillis; 
             Serial.printf("Z%d: Start verification. Moisture: %d%%\n", i+1, moisture);
           } 
           else if (currentMillis - verifyTimers[i] >= SENSOR_VERIFY_TIME) {
-             // Час перевірки вийшов, переходимо в чергу
              verifyTimers[i] = 0; 
              zoneStates[i] = STATE_WAITING; 
-             Serial.printf("Z%d: Verification passed! Moving to QUEUE.\n", i+1);
              sendTelegramMessage(zones[i].topicID, "⚠️ <b>Критично сухо!</b> (" + String(moisture) + "%)\nПочинаю цикл поливу...");
           }
         } 
         else if (moisture >= zones[i].min + 5) { 
-          // Гістерезис: скидаємо таймер тільки якщо вологість реально виросла
-          if (verifyTimers[i] > 0) {
-            verifyTimers[i] = 0; 
-            Serial.printf("Z%d: Moisture stabilized at %d%%. Timer reset.\n", i+1, moisture);
-          }
+          if (verifyTimers[i] > 0) verifyTimers[i] = 0; 
         }
         break;
 
@@ -83,15 +103,8 @@ void updateWateringLogic() {
            digitalWrite(zones[i].relayPin, LOW); 
            zoneStates[i] = STATE_OPENING;
            zoneTimers[i] = currentMillis;
-           isMechanismBusy = true; // Захоплюємо механізм
+           isMechanismBusy = true;
            sendTelegramMessage(zones[i].topicID, "⚙️ <b>Відкриваю клапан...</b>");
-        } else {
-           // Логування причини очікування раз на 10 сек
-           static unsigned long lastWaitLog = 0;
-           if (currentMillis - lastWaitLog > 10000) {
-             Serial.printf("Z%d in QUEUE: MechBusy:%d, QueueLocked:%d\n", i+1, isMechanismBusy, isQueueLocked);
-             lastWaitLog = currentMillis;
-           }
         }
         break;
 
@@ -106,7 +119,8 @@ void updateWateringLogic() {
 
       case STATE_WATERING:
         isPumpNeeded = true; 
-        if (currentMillis - zoneTimers[i] >= zones[i].wateringTime) {
+        // В автоматичному режимі зупиняємо по таймеру. В ручному - поливаємо доки не скасують.
+        if (currentSystemMode == MODE_AUTO && (currentMillis - zoneTimers[i] >= zones[i].wateringTime)) {
           zoneStates[i] = STATE_CLOSING; 
           zoneTimers[i] = currentMillis;
         }
@@ -115,79 +129,69 @@ void updateWateringLogic() {
       case STATE_CLOSING:
         if (currentMillis - zoneTimers[i] >= VALVE_CLOSE_DELAY) {
           digitalWrite(zones[i].relayPin, HIGH); 
-          zoneStates[i] = STATE_ANALYZING;
+          zoneStates[i] = (currentSystemMode == MODE_AUTO) ? STATE_ANALYZING : STATE_IDLE;
           zoneTimers[i] = currentMillis;
           nextAllowedActionTime = currentMillis + QUEUE_DELAY; 
-          sendTelegramMessage(zones[i].topicID, "✅ <b>Полив СТОП.</b>\nКлапан закрито. Чекаю вбирання...");
+          if (currentSystemMode == MODE_AUTO)
+            sendTelegramMessage(zones[i].topicID, "✅ <b>Полив СТОП.</b>\nКлапан закрито. Чекаю вбирання...");
+          else
+            sendTelegramMessage(zones[i].topicID, "⏹ <b>Ручний полив завершено.</b>\nКлапан закрито.");
         }
         break;
 
       case STATE_ANALYZING:
+        if (currentSystemMode == MODE_MANUAL) { zoneStates[i] = STATE_IDLE; break; } // Якщо перемкнули в ручний - виходимо зі стану
         if (currentMillis - zoneTimers[i] >= zones[i].soakingTime) {
           if (moisture < zones[i].max) {
              zoneStates[i] = STATE_WAITING; 
-             String statusText;
-             if (moisture < zones[i].min) statusText = "⚠️ Все ще сухо (" + String(moisture) + "%).";
-             else statusText = "💧 Вологість " + String(moisture) + "%. Треба до " + String(zones[i].max) + "%.";
-             sendTelegramMessage(zones[i].topicID, statusText + "\n🔄 Повторюю цикл поливу!");
+             sendTelegramMessage(zones[i].topicID, "💧 Вологість " + String(moisture) + "%. Треба до " + String(zones[i].max) + "%.\n🔄 Повторюю цикл!");
           } 
           else {
              zoneStates[i] = STATE_IDLE; 
-             sendTelegramMessage(zones[i].topicID, "🆗 <b>Полито повністю!</b> (" + String(moisture) + "%).\nПереходжу в режим сну.");
+             sendTelegramMessage(zones[i].topicID, "🆗 <b>Полито повністю!</b> (" + String(moisture) + "%).\nСплю.");
           }
         }
         break;
     }
   }
 
-  // Керування насосом (Low level trigger - LOW вмикає)
   if (isPumpNeeded) digitalWrite(PUMP_PIN, LOW);
   else digitalWrite(PUMP_PIN, HIGH);
 }
 
 // ==========================================
-// 🎮 РУЧНЕ КЕРУВАННЯ (Telegram / Кнопки)
+// 🎮 РУЧНЕ КЕРУВАННЯ
 // ==========================================
 
-// Перевірка, чи активна зона (поливає або відкривається)
 bool isZoneActive(int i) {
   return (zoneStates[i] != STATE_IDLE && zoneStates[i] != STATE_ANALYZING);
 }
 
-// Примусовий старт зони
 void forceZoneStart(int i) {
   if (i < 0 || i >= NUM_ZONES) return;
-  
-  // Якщо зона не поливає — запускаємо
-  if (zoneStates[i] != STATE_WATERING && zoneStates[i] != STATE_OPENING) {
-     verifyTimers[i] = 0; // Скидаємо таймер перевірки
+  // Дозволяємо ручний пуск ТІЛЬКИ в ручному режимі (як ми домовлялися)
+  if (currentSystemMode == MODE_MANUAL && zoneStates[i] == STATE_IDLE) {
+     verifyTimers[i] = 0;
      zoneStates[i] = STATE_OPENING; 
      zoneTimers[i] = millis();
-     digitalWrite(zones[i].relayPin, LOW); // Миттєва реакція (реле LOW level trigger)
+     lastManualNotify[i] = 0; // Скидаємо лічильник нагадувань
+     digitalWrite(zones[i].relayPin, LOW);
      Serial.printf("MANUAL: Start Zone %d\n", i+1);
   }
 }
 
-// Примусова зупинка зони
 void forceZoneStop(int i) {
   if (i < 0 || i >= NUM_ZONES) return;
-  
-  // Якщо зона активна — зупиняємо коректно
-  if (zoneStates[i] != STATE_IDLE) {
-     zoneStates[i] = STATE_CLOSING; // Переводимо в закриття (щоб не було гідроудару)
+  if (zoneStates[i] != STATE_IDLE && zoneStates[i] != STATE_CLOSING) {
+     zoneStates[i] = STATE_CLOSING; 
      zoneTimers[i] = millis();
      Serial.printf("MANUAL: Stop Zone %d\n", i+1);
   }
 }
 
-// Зупинка всього (Аварійна кнопка)
 void stopAllZones() {
-  Serial.println("⛔ EMERGENCY STOP ALL ZONES!");
   for(int i=0; i<NUM_ZONES; i++) {
-    if (zoneStates[i] != STATE_IDLE) {
-        forceZoneStop(i);
-    }
+    if (zoneStates[i] != STATE_IDLE) forceZoneStop(i);
   }
-  // На всяк випадок вимикаємо насос примусово, якщо логіка не встигне
   digitalWrite(PUMP_PIN, HIGH); 
 }

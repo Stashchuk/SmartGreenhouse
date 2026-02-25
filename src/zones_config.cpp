@@ -3,6 +3,9 @@
 
 Preferences preferences; // Об'єкт для збереження даних
 
+// 👇 НОВЕ: Змінна режиму системи (Авто за замовчуванням)
+SystemMode currentSystemMode = MODE_AUTO;
+
 // ==========================================
 // 🔐 ТУТ ЖИВУТЬ ПАРОЛІ ТА НАЛАШТУВАННЯ
 // ==========================================
@@ -43,23 +46,30 @@ void saveSettings() {
   // Записуємо весь масив зон одним махом
   preferences.putBytes("zones", zones, sizeof(zones));
   
+  // 👇 НОВЕ: Записуємо режим системи
+  preferences.putInt("sysMode", (int)currentSystemMode);
+  
   preferences.end();
-  Serial.println("💾 НАЛАШТУВАННЯ ЗБЕРЕЖЕНО В ПАМ'ЯТЬ!");
+  Serial.println("💾 НАЛАШТУВАННЯ ТА РЕЖИМ ЗБЕРЕЖЕНО В ПАМ'ЯТЬ!");
 }
 
 // Завантажити налаштування при старті
 void loadSettings() {
   preferences.begin("garden-data", true); // Відкриваємо (true = тільки читання)
   
-  // Перевіряємо, чи є збережені дані
+  // Перевіряємо, чи є збережені дані зон
   if (preferences.isKey("zones")) {
     preferences.getBytes("zones", zones, sizeof(zones));
     Serial.println("📂 НАЛАШТУВАННЯ ЗАВАНТАЖЕНО З ПАМ'ЯТІ!");
   } else {
-    Serial.println("⚠️ Пам'ять пуста. Використовуються заводські налаштування.");
-    // Можна зберегти заводські, щоб наступного разу вони були в пам'яті
-    // saveSettings(); 
+    Serial.println("⚠️ Пам'ять зон порожня. Використовуються заводські налаштування.");
   }
+  
+  // 👇 НОВЕ: Завантажуємо режим системи (якщо немає - MODE_AUTO)
+  int savedMode = preferences.getInt("sysMode", (int)MODE_AUTO);
+  currentSystemMode = (SystemMode)savedMode;
+  Serial.print("📂 ПОТОЧНИЙ РЕЖИМ: ");
+  Serial.println(currentSystemMode == MODE_AUTO ? "AUTO" : "MANUAL");
   
   preferences.end();
 }

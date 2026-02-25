@@ -56,3 +56,6 @@ extern Zone zones[NUM_ZONES];
 // 👇 НОВІ ФУНКЦІЇ ДЛЯ ПАМ'ЯТІ
 void saveSettings();
 void loadSettings();
+
+enum SystemMode { MODE_AUTO, MODE_MANUAL };
+extern SystemMode currentSystemMode;
