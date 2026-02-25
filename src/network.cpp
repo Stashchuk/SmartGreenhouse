@@ -8,6 +8,11 @@
 #include "sensors.h" // Потрібно для звіту (дані датчиків)
 #include "logic.h"   // Потрібно для звіту (стани зон)
 
+// 👇 ДОДАНО: Змінні для керування діалогом налаштувань
+enum BotState { IDLE, SET_NAME, SET_MIN, SET_MAX };
+BotState currentState = IDLE;
+int targetZone = -1; 
+
 // 👇 РОЗДІЛЯЄМО КЛІЄНТІВ (Щоб не було конфлікту SSL)
 WiFiClientSecure client;      // Цей залишаємо для MQTT (Railway)
 WiFiClientSecure botClient;   // 🆕 Цей створюємо окремо для Telegram
@@ -83,7 +88,6 @@ void sendTelegramMessage(int topicID, String text) {
   
   String postData = "{\"chat_id\": \"" + String(CHAT_ID) + "\", \"text\": \"" + text + "\", \"parse_mode\": \"HTML\", \"message_thread_id\": " + String(topicID) + "}";
   
-  // 👇 ТУТ ТЕЖ ВИКОРИСТОВУЄМО botClient ЗАМІСТЬ client
   if (botClient.connect("api.telegram.org", 443)) {
     botClient.println("POST /bot" + String(BOTtoken) + "/sendMessage HTTP/1.1");
     botClient.println("Host: api.telegram.org");
@@ -97,26 +101,22 @@ void sendTelegramMessage(int topicID, String text) {
   }
 }
 
-// 🛠 НОВА ФУНКЦІЯ: Тільки генерує текст звіту (щоб можна було слати і в групу, і в приват)
+// 🛠 НОВА ФУНКЦІЯ: Тільки генерує текст звіту
 String getReportBody(bool isStartup) {
   String msg = "🗓 " + getFormattedTime() + "\n";
   if (isStartup) msg += "🚀 <b>СТАРТОВИЙ АНАЛІЗ</b>\n\n";
   else msg += "📊 <b>ЗВІТ (Середнє за період)</b>\n\n";
   
-  // Дані зон
   msg += "🌱 <b>Вологість Ґрунту:</b>\n";
   for (int i = 0; i < NUM_ZONES; i++) {
     int avg = getAverageMoisture(i);
-    msg += "Z" + String(i+1) + " " + zones[i].name + ": <b>" + String(avg) + "%</b>";
+    msg += "Z" + String(i+1) + " " + String(zones[i].name) + ": <b>" + String(avg) + "%</b>";
     msg += " | " + String(zones[i].min) + "-" + String(zones[i].max) + "%";
-    
-    // Отримуємо статус текстом
     msg += " " + getZoneStatusText(i, avg);
     msg += "\n";
   }
-  resetSensorAverages(); // Скидання лічильників
+  resetSensorAverages(); 
 
-  // Клімат
   float t, h, p;
   getAverageClimate(t, h, p);
   
@@ -128,7 +128,6 @@ String getReportBody(bool isStartup) {
     msg += "⚠️ BME280 Error!\n";
   }
 
-  // Система
   uint32_t totalRam = ESP.getHeapSize() / 1024;
   uint32_t freeRam = ESP.getFreeHeap() / 1024;
   uint32_t usedRam = totalRam - freeRam;
@@ -142,24 +141,14 @@ String getReportBody(bool isStartup) {
   return msg;
 }
 
-// Ця функція викликається таймером -> шле в ГРУПУ
 void sendReport(bool isStartup) {
   if (WiFi.status() != WL_CONNECTED) {
     WiFi.disconnect(); WiFi.reconnect(); return;
   }
-
-  // Генеруємо текст
   String msg = getReportBody(isStartup);
-
-  // Шлемо в групу (TOPIC_MAIN)
   sendTelegramMessage(TOPIC_MAIN, msg);
 }
 
-// ==========================================
-// 🤖 ЛОГІКА TELEGRAM БОТА
-// ==========================================
-
-// Перевірка, чи є користувач у списку адмінів
 bool isAdmin(String id) {
   for (int i = 0; i < numAdmins; i++) {
     if (String(adminChatIds[i]) == id) return true;
@@ -167,33 +156,71 @@ bool isAdmin(String id) {
   return false;
 }
 
-// Обробка вхідних повідомлень
+// 👇 НОВА ДОПОМІЖНА ФУНКЦІЯ ДЛЯ ГОЛОВНОГО МЕНЮ
+void gotoMainMenu(String chat_id) {
+  currentState = IDLE;
+  targetZone = -1;
+  
+  String keyboardJson = "[";
+  for (int i = 0; i < NUM_ZONES; i++) {
+    keyboardJson += "[{ \"text\": \"▶️ " + String(zones[i].name) + "\", \"callback_data\": \"on_" + String(i) + "\" },";
+    keyboardJson += "{ \"text\": \"⏹\", \"callback_data\": \"off_" + String(i) + "\" }],"; 
+  }
+  keyboardJson += "[{ \"text\": \"📊 СТАТУС\", \"callback_data\": \"status\" },";
+  keyboardJson += "{ \"text\": \"⚙️ НАЛАШТУВАННЯ\", \"callback_data\": \"settings_main\" }],";
+  keyboardJson += "[{ \"text\": \"🚨 СТОП ВСЕ\", \"callback_data\": \"stop_all\" }]";
+  keyboardJson += "]";
+  
+  bot.sendMessageWithInlineKeyboard(chat_id, "🎛 <b>Головне меню:</b>", "HTML", keyboardJson);
+}
+
+// 🛠 ОНОВЛЕНА ОБРОБКА ПОВІДОМЛЕНЬ
 void handleMessages(int numNewMessages) {
   for (int i = 0; i < numNewMessages; i++) {
     String chat_id = String(bot.messages[i].chat_id);
     String text = bot.messages[i].text;
-    String type = bot.messages[i].type;  // Отримуємо тип повідомлення
-    
-    // Перевіряємо, чи це натискання кнопки
-    String query_data = "";
-    if (type == "callback_query") {
-      query_data = text; // У цій бібліотеці дані кнопки лежать тут
-    }
+    String type = bot.messages[i].type;
 
-    // 🔒 ЗАХИСТ: Якщо пише не адмін — ігноруємо
     if (!isAdmin(chat_id)) {
       bot.sendMessage(chat_id, "⛔ Немає доступу.", "");
       continue;
     }
 
-    // 1️⃣ ОБРОБКА КНОПОК
+    // --- ЛОГІКА ВВЕДЕННЯ ТЕКСТУ (Діалог редагування) ---
+    if (type == "message" && currentState != IDLE) {
+      if (targetZone != -1) {
+        if (currentState == SET_NAME) {
+          text.toCharArray(zones[targetZone].name, 30);
+          bot.sendMessage(chat_id, "✅ Назву змінено на: <b>" + String(zones[targetZone].name) + "</b>", "HTML");
+        } 
+        else if (currentState == SET_MIN) {
+          int val = text.toInt();
+          if (val >= 0 && val < zones[targetZone].max) {
+            zones[targetZone].min = val;
+            bot.sendMessage(chat_id, "✅ Поріг MIN змінено на: <b>" + String(val) + "%</b>", "HTML");
+          } else bot.sendMessage(chat_id, "❌ Помилка! Значення має бути від 0 до " + String(zones[targetZone].max), "");
+        }
+        else if (currentState == SET_MAX) {
+          int val = text.toInt();
+          if (val > zones[targetZone].min && val <= 100) {
+            zones[targetZone].max = val;
+            bot.sendMessage(chat_id, "✅ Поріг MAX змінено на: <b>" + String(val) + "%</b>", "HTML");
+          } else bot.sendMessage(chat_id, "❌ Помилка! Значення має бути від " + String(zones[targetZone].min) + " до 100", "");
+        }
+        
+        saveSettings(); // 💾 ЗБЕРЕЖЕННЯ В ПАМ'ЯТЬ
+        gotoMainMenu(chat_id);
+      }
+      continue; 
+    }
+
+    // --- ЛОГІКА КНОПОК ---
+    String query_data = (type == "callback_query") ? text : "";
+
     if (query_data != "") {
        if (query_data == "status") {
-         // 👇 ТУТ ЗМІНА: Формуємо звіт і шлемо ОСОБИСТО тому, хто натиснув
-         String report = getReportBody(false);
-         bot.sendMessage(chat_id, report, "HTML");
-         
-         bot.answerCallbackQuery(bot.messages[i].query_id, "Звіт готовий!");
+         bot.sendMessage(chat_id, getReportBody(false), "HTML");
+         bot.answerCallbackQuery(bot.messages[i].query_id, "");
        }
        else if (query_data == "stop_all") {
          stopAllZones();
@@ -202,35 +229,48 @@ void handleMessages(int numNewMessages) {
        else if (query_data.startsWith("on_")) {
          int z = query_data.substring(3).toInt();
          forceZoneStart(z);
-         bot.sendMessage(chat_id, "▶️ Запуск: <b>" + zones[z].name + "</b>", "HTML");
+         bot.sendMessage(chat_id, "▶️ Запуск: <b>" + String(zones[z].name) + "</b>", "HTML");
        }
        else if (query_data.startsWith("off_")) {
          int z = query_data.substring(4).toInt();
          forceZoneStop(z);
-         bot.sendMessage(chat_id, "⏹ Зупинка: <b>" + zones[z].name + "</b>", "HTML");
+         bot.sendMessage(chat_id, "⏹ Зупинка: <b>" + String(zones[z].name) + "</b>", "HTML");
        }
+       // МЕНЮ НАЛАШТУВАНЬ
+       else if (query_data == "settings_main") {
+         String keyboardJson = "[";
+         for (int j = 0; j < NUM_ZONES; j++) {
+           keyboardJson += "[{\"text\": \"⚙️ " + String(zones[j].name) + "\", \"callback_data\": \"edit_z" + String(j) + "\"}],";
+         }
+         keyboardJson += "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"main_menu\"}]";
+         keyboardJson += "]";
+         bot.sendMessageWithInlineKeyboard(chat_id, "Оберіть зону для редагування:", "HTML", keyboardJson);
+       }
+       else if (query_data.startsWith("edit_z")) {
+         targetZone = query_data.substring(6).toInt();
+         String keyboardJson = "["
+           "[{\"text\": \"🏷 Назва\", \"callback_data\": \"set_name\"}],"
+           "[{\"text\": \"📉 MIN (" + String(zones[targetZone].min) + "%)\", \"callback_data\": \"set_min\"}],"
+           "[{\"text\": \"📈 MAX (" + String(zones[targetZone].max) + "%)\", \"callback_data\": \"set_max\"}],"
+           "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"settings_main\"}]"
+           "]";
+         bot.sendMessageWithInlineKeyboard(chat_id, "Редагування <b>" + String(zones[targetZone].name) + "</b>:", "HTML", keyboardJson);
+       }
+       else if (query_data == "set_name") { currentState = SET_NAME; bot.sendMessage(chat_id, "Введіть нову назву:", ""); }
+       else if (query_data == "set_min") { currentState = SET_MIN; bot.sendMessage(chat_id, "Введіть MIN вологість:", ""); }
+       else if (query_data == "set_max") { currentState = SET_MAX; bot.sendMessage(chat_id, "Введіть MAX вологість:", ""); }
+       else if (query_data == "main_menu") { gotoMainMenu(chat_id); }
+       
+       bot.answerCallbackQuery(bot.messages[i].query_id, "");
        continue; 
     }
 
-    // 2️⃣ ГОЛОВНЕ МЕНЮ (/start)
     if (text == "/start" || text == "/menu" || text == "menu") {
-      String keyboardJson = "[";
-      
-      for (int i = 0; i < NUM_ZONES; i++) {
-        keyboardJson += "[{ \"text\": \"▶️ " + zones[i].name + "\", \"callback_data\": \"on_" + String(i) + "\" },";
-        keyboardJson += "{ \"text\": \"⏹ Стоп\", \"callback_data\": \"off_" + String(i) + "\" }],"; 
-      }
-
-      keyboardJson += "[{ \"text\": \"📊 СТАТУС\", \"callback_data\": \"status\" }],";
-      keyboardJson += "[{ \"text\": \"🚨 СТОП ВСЕ\", \"callback_data\": \"stop_all\" }]";
-      keyboardJson += "]";
-      
-      bot.sendMessageWithInlineKeyboard(chat_id, "🎛 <b>Меню керування:</b>", "HTML", keyboardJson);
+      gotoMainMenu(chat_id);
     }
   }
 }
 
-// Головна функція
 unsigned long lastBotRun = 0;
 void handleTelegram() {
   if (millis() - lastBotRun > 5000) { 

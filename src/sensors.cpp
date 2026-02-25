@@ -80,7 +80,8 @@ void updateLcdLoop() {
     int i = currentZoneDisp;
     
     lcd.setCursor(0, 0); 
-    lcd.print("Z" + String(i + 1) + ":" + zones[i].name.substring(0, 12));
+    // 👇 ВИПРАВЛЕНО: Додано String(), щоб substring працював з char array
+    lcd.print("Z" + String(i + 1) + ":" + String(zones[i].name).substring(0, 12));
     
     lcd.setCursor(0, 1);
     
