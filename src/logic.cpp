@@ -144,3 +144,50 @@ void updateWateringLogic() {
   if (isPumpNeeded) digitalWrite(PUMP_PIN, LOW);
   else digitalWrite(PUMP_PIN, HIGH);
 }
+
+// ==========================================
+// 🎮 РУЧНЕ КЕРУВАННЯ (Telegram / Кнопки)
+// ==========================================
+
+// Перевірка, чи активна зона (поливає або відкривається)
+bool isZoneActive(int i) {
+  return (zoneStates[i] != STATE_IDLE && zoneStates[i] != STATE_ANALYZING);
+}
+
+// Примусовий старт зони
+void forceZoneStart(int i) {
+  if (i < 0 || i >= NUM_ZONES) return;
+  
+  // Якщо зона не поливає — запускаємо
+  if (zoneStates[i] != STATE_WATERING && zoneStates[i] != STATE_OPENING) {
+     verifyTimers[i] = 0; // Скидаємо таймер перевірки
+     zoneStates[i] = STATE_OPENING; 
+     zoneTimers[i] = millis();
+     digitalWrite(zones[i].relayPin, LOW); // Миттєва реакція (реле LOW level trigger)
+     Serial.printf("MANUAL: Start Zone %d\n", i+1);
+  }
+}
+
+// Примусова зупинка зони
+void forceZoneStop(int i) {
+  if (i < 0 || i >= NUM_ZONES) return;
+  
+  // Якщо зона активна — зупиняємо коректно
+  if (zoneStates[i] != STATE_IDLE) {
+     zoneStates[i] = STATE_CLOSING; // Переводимо в закриття (щоб не було гідроудару)
+     zoneTimers[i] = millis();
+     Serial.printf("MANUAL: Stop Zone %d\n", i+1);
+  }
+}
+
+// Зупинка всього (Аварійна кнопка)
+void stopAllZones() {
+  Serial.println("⛔ EMERGENCY STOP ALL ZONES!");
+  for(int i=0; i<NUM_ZONES; i++) {
+    if (zoneStates[i] != STATE_IDLE) {
+        forceZoneStop(i);
+    }
+  }
+  // На всяк випадок вимикаємо насос примусово, якщо логіка не встигне
+  digitalWrite(PUMP_PIN, HIGH); 
+}

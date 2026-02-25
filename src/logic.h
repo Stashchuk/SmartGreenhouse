@@ -16,4 +16,9 @@ void updateWateringLogic();
 ZoneState getZoneState(int i);
 unsigned long getZoneTimer(int i);
 unsigned long getVerifyTimer(int i);
-String getZoneStatusText(int i, int currentMoisture); // Для звіту
+String getZoneStatusText(int i, int currentMoisture); 
+
+// 👇 ДОДАЄМО ЦІ ФУНКЦІЇ, ЩОБ ЇХ БАЧИВ NETWORK.CPP
+void forceZoneStart(int i);
+void forceZoneStop(int i);
+void stopAllZones();

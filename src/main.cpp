@@ -30,6 +30,7 @@ void setup() {
 
 void loop() {
   checkWiFiConnection();
+  handleTelegram(); // <--- 🆕 ДОДАЙ ЦЕ (Слухаємо команди)
   updateWateringLogic();
   updateSensorsLoop();
   updateLcdLoop();

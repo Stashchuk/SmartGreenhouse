@@ -19,7 +19,7 @@ WiFiClient espClient;
 PubSubClient mqtt(espClient);
 
 unsigned long lastMqttPublish = 0;
-#define MQTT_INTERVAL 5000 
+#define MQTT_INTERVAL 60000
 
 void setupMQTT() {
   mqtt.setServer(mqtt_server, mqtt_port);
