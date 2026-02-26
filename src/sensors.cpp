@@ -48,7 +48,7 @@ int getPercent(int i) {
 }
 
 void updateSensorsLoop() {
-  if (millis() - lastSampleTime > SAMPLE_INTERVAL) {
+  if (millis() - lastSampleTime > sampleInterval) { // 🔄 Змінено
     lastSampleTime = millis();
     for (int i = 0; i < NUM_ZONES; i++) sumH[i] += getPercent(i);
     if (bmeStatus) {
@@ -89,7 +89,7 @@ void updateLcdLoop() {
   static int screen = 0; 
   static unsigned long lastMarqueeUpdate = 0; 
   
-  if (millis() - lastLcdTime > LCD_INTERVAL) {
+  if (millis() - lastLcdTime > lcdInterval) { // 🔄 Змінено
     lastLcdTime = millis();
     lcd.clear();
     

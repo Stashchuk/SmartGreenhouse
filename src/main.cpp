@@ -4,15 +4,22 @@
 #include "network.h"
 #include "sensors.h"
 #include "logic.h"
-#include "mqtt_logic.h" // <--- 1. ДОДАЛИ
+#include "mqtt_logic.h" 
 
 unsigned long lastTelegramTime = 0;
 bool startupReportSent = false;
 
 void setup() {
   Serial.begin(115200);
-  loadSettings(); // <--- 🆕 ДОДАЙ ЦЕЙ РЯДОК (Завантаження пам'яті)
-  saveSettings(); // ЗАПИШЕ ТВОЇ ПРАВИЛЬНІ ДАНІ (Hamedoreya, Happiness тощо) поверх сміття
+  
+  // 👇 НОВЕ: Ініціалізація пінів датчика рівня води (AJ-SR04M)
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  digitalWrite(TRIG_PIN, LOW);
+
+  loadSettings(); 
+  saveSettings(); 
+  
   pinMode(LED_PIN, OUTPUT);
   
   setupSensors();
@@ -20,7 +27,7 @@ void setup() {
   
   setupLogic();
   setupWiFi();
-  setupMQTT(); // <--- 2. ЗАПУСТИЛИ MQTT
+  setupMQTT(); 
 
   if (WiFi.status() == WL_CONNECTED) {
       sendTelegramMessage(TOPIC_SERVICE, "✅ <b>Система запущена!</b>\nWiFi: OK");
@@ -32,18 +39,20 @@ void setup() {
 
 void loop() {
   checkWiFiConnection();
-  handleTelegram(); // <--- 🆕 ДОДАЙ ЦЕ (Слухаємо команди)
+  handleTelegram(); 
   updateWateringLogic();
   updateSensorsLoop();
   updateLcdLoop();
-  updateMQTTLoop(); // <--- 3. КРУТИМО ЦИКЛ MQTT
+  updateMQTTLoop(); 
 
-  if (millis() - lastTelegramTime > REPORT_INTERVAL) {
+  // 🔄 Змінено: використовуємо змінну reportInterval замість константи
+  if (millis() - lastTelegramTime > reportInterval) {
     lastTelegramTime = millis();
     sendReport(false); 
   }
   
-  if (!startupReportSent && millis() > STARTUP_REPORT_DELAY) {
+  // 🔄 Змінено: використовуємо змінну startupReportDelay замість константи
+  if (!startupReportSent && millis() > startupReportDelay) {
     sendReport(true); 
     startupReportSent = true; 
   }

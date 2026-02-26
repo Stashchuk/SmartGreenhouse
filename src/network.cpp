@@ -8,13 +8,16 @@
 #include "sensors.h" 
 #include "logic.h"   
 
-// 👇 Змінні для керування діалогом налаштувань
-enum BotState { IDLE, SET_NAME, SET_MIN, SET_MAX };
+enum BotState { 
+  IDLE, SET_NAME, SET_MIN, SET_MAX,
+  SET_T_OPEN, SET_T_CLOSE, SET_T_QUEUE, SET_T_VERIFY,
+  SET_T_REPORT, SET_T_LCD
+};
 BotState currentState = IDLE;
 int targetZone = -1; 
 
-WiFiClientSecure client;      // Для MQTT (якщо використовуєш)
-WiFiClientSecure botClient;   // Для Telegram
+WiFiClientSecure client;      
+WiFiClientSecure botClient;   
 
 UniversalTelegramBot bot(BOTtoken, botClient); 
 
@@ -25,10 +28,8 @@ unsigned long lastBotRun = 0;
 void setupWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) { delay(500); attempts++; }
-
   if(WiFi.status() == WL_CONNECTED){
     configTzTime("EET-2EEST,M3.5.0/3,M10.5.0/4", "pool.ntp.org");
     client.setInsecure();    
@@ -43,278 +44,187 @@ void checkWiFiConnection() {
        totalOfflineMillis += 1000;
        lastWifiCheckTime = currentMillis;
     }
-  } else {
-    lastWifiCheckTime = currentMillis;
-  }
+  } else lastWifiCheckTime = currentMillis;
 }
 
 unsigned long getTotalOfflineTime() { return totalOfflineMillis; }
 
 String getWifiQuality() {
   long rssi = WiFi.RSSI();
-  String status;
-  if (rssi > -50) status = "(Відмінний 🤩)";
-  else if (rssi > -60) status = "(Хороший 😊)";
-  else if (rssi > -70) status = "(Нормальний 👌)";
-  else if (rssi > -80) status = "(Слабкий ⚠️)";
-  else status = "(Критичний 🆘)";
-  return String(rssi) + " dBm " + status;
+  if (rssi > -50) return String(rssi) + " dBm (Відмінний 🤩)";
+  if (rssi > -60) return String(rssi) + " dBm (Хороший 😊)";
+  if (rssi > -70) return String(rssi) + " dBm (Нормальний 👌)";
+  return String(rssi) + " dBm (Слабкий ⚠️)";
 }
 
 String getUptime() {
   unsigned long sec = millis() / 1000;
-  int days = sec / 86400;
-  int hours = (sec % 86400) / 3600;
-  int mins = (sec % 3600) / 60;
-  return String(days) + "д " + String(hours) + "г " + String(mins) + "хв";
+  int d = sec / 86400;
+  int h = (sec % 86400) / 3600;
+  int m = (sec % 3600) / 60;
+  return String(d) + "д " + String(h) + "г " + String(m) + "хв";
 }
 
 String getFormattedTime() {
-  struct tm timeinfo;
-  if(!getLocalTime(&timeinfo)) return "Time Error";
-  char buff[50];
-  strftime(buff, sizeof(buff), "%d.%m.%Y %H:%M:%S", &timeinfo);
-  return String(buff);
+  struct tm ti;
+  if(!getLocalTime(&ti)) return "Time Error";
+  char buf[50];
+  strftime(buf, sizeof(buf), "%d.%m.%Y %H:%M:%S", &ti);
+  return String(buf);
 }
 
 void sendTelegramMessage(int topicID, String text) {
   if (WiFi.status() != WL_CONNECTED) return;
-  
   String postData = "{\"chat_id\": \"" + String(CHAT_ID) + "\", \"text\": \"" + text + "\", \"parse_mode\": \"HTML\", \"message_thread_id\": " + String(topicID) + "}";
-  
   if (botClient.connect("api.telegram.org", 443)) {
     botClient.println("POST /bot" + String(BOTtoken) + "/sendMessage HTTP/1.1");
     botClient.println("Host: api.telegram.org");
     botClient.println("Content-Type: application/json");
     botClient.print("Content-Length: "); botClient.println(postData.length());
     botClient.println(); botClient.println(postData);
-    
     unsigned long t = millis();
     while (botClient.available() == 0 && millis() - t < 2000);
     botClient.stop();
   }
 }
 
-// 🛠 ЗВІТ ПРО СТАТУС (Оновлено для статусу вимкнених зон)
 String getReportBody(bool isStartup) {
   String msg = "🗓 " + getFormattedTime() + "\n";
-  if (isStartup) msg += "🚀 <b>СТАРТОВИЙ АНАЛІЗ</b>\n\n";
-  else msg += "📊 <b>ЗВІТ (Середнє за період)</b>\n\n";
-  
-  msg += "🌱 <b>Вологість Ґрунту:</b>\n";
+  msg += isStartup ? "🚀 <b>СТАРТОВИЙ АНАЛІЗ</b>\n\n" : "📊 <b>ЗВІТ (Середнє)</b>\n\n";
+  msg += "🌱 <b>Вологість:</b>\n";
   for (int i = 0; i < NUM_ZONES; i++) {
-    // Якщо зона вимкнена - показуємо це
-    if (!zones[i].enabled) {
-         msg += "Z" + String(i+1) + " " + String(zones[i].name) + ": ⛔ <b>ВИМКНЕНО</b>\n";
-    } else {
-         int avg = getAverageMoisture(i);
-         msg += "Z" + String(i+1) + " " + String(zones[i].name) + ": <b>" + String(avg) + "%</b>";
-         msg += " | " + String(zones[i].min) + "-" + String(zones[i].max) + "%";
-         msg += " " + getZoneStatusText(i, avg);
-         msg += "\n";
+    if (!zones[i].enabled) msg += "Z" + String(i+1) + " " + String(zones[i].name) + ": ⛔ <b>ВИМКНЕНО</b>\n";
+    else {
+      int avg = getAverageMoisture(i);
+      msg += "Z" + String(i+1) + " " + String(zones[i].name) + ": <b>" + String(avg) + "%</b> | " + String(zones[i].min) + "-" + String(zones[i].max) + "% " + getZoneStatusText(i, avg) + "\n";
     }
   }
   resetSensorAverages(); 
-
-  float t, h, p;
-  getAverageClimate(t, h, p);
-  
-  msg += "\n📦 <b>Клімат:</b>\n";
-  if (isBmeWorking()) {
-    msg += "🌡 Т: <b>" + String(t, 1) + "°C</b>  💧 В: <b>" + String(h, 0) + "%</b>\n";
-    msg += "⚙️ Тиск: <b>" + String((int)p) + " мм</b>\n";
-  } else {
-    msg += "⚠️ BME280 Error!\n";
-  }
-
-  uint32_t totalRam = ESP.getHeapSize() / 1024;
-  uint32_t freeRam = ESP.getFreeHeap() / 1024;
-  uint32_t usedRam = totalRam - freeRam;
-  
-  msg += "\n🔧 <b>СИСТЕМА:</b>\n";
-  msg += "📶 WiFi: " + getWifiQuality() + "\n";
-  msg += "🧠 RAM: " + String(usedRam) + "/" + String(totalRam) + " KB\n";
-  msg += "⏱ Аптайм: " + getUptime() + "\n";
-  
+  float t, h, p; getAverageClimate(t, h, p);
+  if (isBmeWorking()) msg += "\n📦 <b>Клімат:</b>\n🌡 Т: <b>" + String(t, 1) + "°C</b>  💧 В: <b>" + String(h, 0) + "%</b>  ⚙️ <b>" + String((int)p) + " мм</b>\n";
+  msg += "\n🔧 WiFi: " + getWifiQuality() + "\n⏱ Up: " + getUptime() + "\n";
   return msg;
 }
 
-void sendReport(bool isStartup) {
-  if (WiFi.status() != WL_CONNECTED) {
-    WiFi.disconnect(); WiFi.reconnect(); return;
-  }
-  String msg = getReportBody(isStartup);
-  sendTelegramMessage(TOPIC_MAIN, msg);
-}
+void sendReport(bool isStartup) { if (WiFi.status() == WL_CONNECTED) sendTelegramMessage(TOPIC_MAIN, getReportBody(isStartup)); }
 
 bool isAdmin(String id) {
-  for (int i = 0; i < numAdmins; i++) {
-    if (String(adminChatIds[i]) == id) return true;
-  }
+  for (int i = 0; i < numAdmins; i++) if (String(adminChatIds[i]) == id) return true;
   return false;
 }
 
-// Меню (твоя функція)
 void gotoMainMenu(String chat_id) {
-  currentState = IDLE;
-  targetZone = -1;
-  
-  String keyboardJson = "[";
-  
+  currentState = IDLE; targetZone = -1;
+  String kb = "[";
   if (currentSystemMode == MODE_MANUAL) {
     for (int i = 0; i < NUM_ZONES; i++) {
-      // Показуємо кнопки запуску тільки якщо зона увімкнена
-      if (zones[i].enabled) {
-        keyboardJson += "[{ \"text\": \"▶️ " + String(zones[i].name) + "\", \"callback_data\": \"on_" + String(i) + "\" },";
-        keyboardJson += "{ \"text\": \"⏹\", \"callback_data\": \"off_" + String(i) + "\" }],"; 
-      }
+      if (zones[i].enabled) kb += "[{ \"text\": \"▶️ " + String(zones[i].name) + "\", \"callback_data\": \"on_" + String(i) + "\" },{ \"text\": \"⏹\", \"callback_data\": \"off_" + String(i) + "\" }],"; 
     }
   }
-
-  keyboardJson += "[{ \"text\": \"📊 СТАТУС\", \"callback_data\": \"status\" },";
-  keyboardJson += "{ \"text\": \"⚙️ НАЛАШТУВАННЯ\", \"callback_data\": \"settings_main\" }],";
-  keyboardJson += "[{ \"text\": \"🚨 СТОП ВСЕ\", \"callback_data\": \"stop_all\" }]";
-  keyboardJson += "]";
-  
-  String modeName = (currentSystemMode == MODE_AUTO) ? "🤖 АВТОМАТИКА" : "👤 РУЧНИЙ";
-  bot.sendMessageWithInlineKeyboard(chat_id, "🎛 <b>Меню (" + modeName + "):</b>", "HTML", keyboardJson);
+  kb += "[{ \"text\": \"📊 СТАТУС\", \"callback_data\": \"status\" },{ \"text\": \"⚙️ НАЛАШТУВАННЯ\", \"callback_data\": \"settings_main\" }],";
+  kb += "[{ \"text\": \"🚨 СТОП ВСЕ\", \"callback_data\": \"stop_all\" }]]";
+  String mode = (currentSystemMode == MODE_AUTO) ? "🤖 АВТОМАТИКА" : "👤 РУЧНИЙ";
+  bot.sendMessageWithInlineKeyboard(chat_id, "🎛 <b>Меню (" + mode + "):</b>", "HTML", kb);
 }
 
-// 🛠 ОБРОБКА ПОВІДОМЛЕНЬ
 void handleMessages(int numNewMessages) {
   for (int i = 0; i < numNewMessages; i++) {
     String chat_id = String(bot.messages[i].chat_id);
     String text = bot.messages[i].text;
     String type = bot.messages[i].type;
+    if (!isAdmin(chat_id)) continue;
 
-    if (!isAdmin(chat_id)) {
-      bot.sendMessage(chat_id, "⛔ Немає доступу.", "");
-      continue;
-    }
-
-    // 1. ДІАЛОГ НАЛАШТУВАНЬ (Назва, Мін, Макс)
     if (type == "message" && currentState != IDLE) {
+      unsigned long val = text.toInt();
+      bool done = false;
+      // Налаштування зони - працює ЗАВЖДИ
       if (targetZone != -1) {
-        if (currentState == SET_NAME) {
-          text.toCharArray(zones[targetZone].name, 30);
-          bot.sendMessage(chat_id, "✅ Назву змінено на: <b>" + String(zones[targetZone].name) + "</b>", "HTML");
-        } 
-        else if (currentState == SET_MIN) {
-          int val = text.toInt();
-          if (val >= 0 && val < zones[targetZone].max) {
-            zones[targetZone].min = val;
-            bot.sendMessage(chat_id, "✅ Поріг MIN змінено на: <b>" + String(val) + "%</b>", "HTML");
-          } else bot.sendMessage(chat_id, "❌ Помилка! Значення має бути від 0 до " + String(zones[targetZone].max), "");
-        }
-        else if (currentState == SET_MAX) {
-          int val = text.toInt();
-          if (val > zones[targetZone].min && val <= 100) {
-            zones[targetZone].max = val;
-            bot.sendMessage(chat_id, "✅ Поріг MAX змінено на: <b>" + String(val) + "%</b>", "HTML");
-          } else bot.sendMessage(chat_id, "❌ Помилка! Значення має бути від " + String(zones[targetZone].min) + " до 100", "");
-        }
-        
-        saveSettings(); 
-        currentState = IDLE; 
-        targetZone = -1;
-        gotoMainMenu(chat_id); // Повернення в меню після збереження
+        if (currentState == SET_NAME) { text.toCharArray(zones[targetZone].name, 30); done = true; }
+        else if (currentState == SET_MIN) { zones[targetZone].min = (int)val; done = true; }
+        else if (currentState == SET_MAX) { zones[targetZone].max = (int)val; done = true; }
+      } 
+      // Налаштування таймінгів - ТІЛЬКИ В АВТО
+      else if (currentSystemMode == MODE_AUTO) {
+        if (currentState == SET_T_OPEN) { valveOpenDelay = val; done = true; }
+        else if (currentState == SET_T_CLOSE) { valveCloseDelay = val; done = true; }
+        else if (currentState == SET_T_QUEUE) { queueDelay = val; done = true; }
+        else if (currentState == SET_T_VERIFY) { sensorVerifyTime = val; done = true; }
+        else if (currentState == SET_T_REPORT) { reportInterval = val; done = true; }
+        else if (currentState == SET_T_LCD) { lcdInterval = val; done = true; }
       }
-      continue; 
-    }
 
-    // 2. НОВІ КОМАНДИ ВИМКНЕННЯ ЗОН
-    if (text == "/off1") { setZoneEnable(0, false); bot.sendMessage(chat_id, "⛔ Зона 1 ВИМКНЕНА.", ""); continue; }
-    if (text == "/on1")  { setZoneEnable(0, true);  bot.sendMessage(chat_id, "✅ Зона 1 УВІМКНЕНА.", ""); continue; }
-
-    if (text == "/off2") { setZoneEnable(1, false); bot.sendMessage(chat_id, "⛔ Зона 2 ВИМКНЕНА.", ""); continue; }
-    if (text == "/on2")  { setZoneEnable(1, true);  bot.sendMessage(chat_id, "✅ Зона 2 УВІМКНЕНА.", ""); continue; }
-
-    if (text == "/off3") { setZoneEnable(2, false); bot.sendMessage(chat_id, "⛔ Зона 3 ВИМКНЕНА.", ""); continue; }
-    if (text == "/on3")  { setZoneEnable(2, true);  bot.sendMessage(chat_id, "✅ Зона 3 УВІМКНЕНА.", ""); continue; }
-
-    if (text == "/off4") { setZoneEnable(3, false); bot.sendMessage(chat_id, "⛔ Зона 4 ВИМКНЕНА.", ""); continue; }
-    if (text == "/on4")  { setZoneEnable(3, true);  bot.sendMessage(chat_id, "✅ Зона 4 УВІМКНЕНА.", ""); continue; }
-
-    if (text == "/off_all") {
-      for(int k=0; k<NUM_ZONES; k++) setZoneEnable(k, false);
-      bot.sendMessage(chat_id, "❄️ <b>ЗИМОВИЙ РЕЖИМ:</b> Всі зони вимкнено!", "HTML");
-      continue;
-    }
-    if (text == "/on_all") {
-      for(int k=0; k<NUM_ZONES; k++) setZoneEnable(k, true);
-      bot.sendMessage(chat_id, "🌱 <b>ВЕСНА:</b> Всі зони увімкнено!", "HTML");
+      if (done) { saveSettings(); gotoMainMenu(chat_id); }
+      else { bot.sendMessage(chat_id, "⚠️ Зміна таймінгів можлива лише в АВТО!", ""); currentState = IDLE; }
       continue;
     }
 
-    // 3. СТАНДАРТНІ КОМАНДИ
-    if (text == "/status") {
-        bot.sendMessage(chat_id, getReportBody(false), "HTML");
-        continue;
-    }
-    if (text == "/start" || text == "/menu" || text == "menu") {
-      gotoMainMenu(chat_id);
-      continue;
-    }
+    // Твої оригінальні команди (завжди активні)
+    if (text == "/off1") { setZoneEnable(0, false); bot.sendMessage(chat_id, "Z1 OFF", ""); continue; }
+    if (text == "/on1")  { setZoneEnable(0, true);  bot.sendMessage(chat_id, "Z1 ON", ""); continue; }
+    if (text == "/off2") { setZoneEnable(1, false); bot.sendMessage(chat_id, "Z2 OFF", ""); continue; }
+    if (text == "/on2")  { setZoneEnable(1, true);  bot.sendMessage(chat_id, "Z2 ON", ""); continue; }
+    if (text == "/off3") { setZoneEnable(2, false); bot.sendMessage(chat_id, "Z3 OFF", ""); continue; }
+    if (text == "/on3")  { setZoneEnable(2, true);  bot.sendMessage(chat_id, "Z3 ON", ""); continue; }
+    if (text == "/off4") { setZoneEnable(3, false); bot.sendMessage(chat_id, "Z4 OFF", ""); continue; }
+    if (text == "/on4")  { setZoneEnable(3, true);  bot.sendMessage(chat_id, "Z4 ON", ""); continue; }
+    if (text == "/off_all") { for(int k=0; k<NUM_ZONES; k++) setZoneEnable(k, false); bot.sendMessage(chat_id, "ALL OFF", ""); continue; }
+    if (text == "/on_all") { for(int k=0; k<NUM_ZONES; k++) setZoneEnable(k, true); bot.sendMessage(chat_id, "ALL ON", ""); continue; }
+    if (text == "/status") { bot.sendMessage(chat_id, getReportBody(false), "HTML"); continue; }
+    if (text == "/start" || text == "/menu") { gotoMainMenu(chat_id); continue; }
 
-    // 4. ОБРОБКА КНОПОК (CALLBACK)
-    String query_data = (type == "callback_query") ? text : "";
-    if (query_data != "") {
-       if (query_data == "status") {
-         bot.sendMessage(chat_id, getReportBody(false), "HTML");
+    String q = (type == "callback_query") ? text : "";
+    if (q != "") {
+       if (q == "status") bot.sendMessage(chat_id, getReportBody(false), "HTML");
+       else if (q == "stop_all") { stopAllZones(); bot.sendMessage(chat_id, "🛑 СТОП", ""); }
+       // 👇 ПУСК ЗОНИ - ТІЛЬКИ В РУЧНОМУ
+       else if (q.startsWith("on_")) {
+          if (currentSystemMode == MODE_MANUAL) forceZoneStart(q.substring(3).toInt());
+          else bot.sendMessage(chat_id, "⚠️ Керування насосом доступне лише в РУЧНОМУ режимі!", "");
        }
-       else if (query_data == "stop_all") {
-         stopAllZones();
-         bot.sendMessage(chat_id, "🛑 <b>ВСІ ЗОНИ ЗУПИНЕНО!</b>", "HTML");
-       }
-       else if (query_data.startsWith("on_")) {
-         if (currentSystemMode == MODE_MANUAL) {
-            int z = query_data.substring(3).toInt();
-            forceZoneStart(z);
-            // Повідомлення про запуск відправить логіка, якщо все ок
-         } else {
-            bot.sendMessage(chat_id, "❌ Помилка! Увімкніть РУЧНИЙ РЕЖИМ.", "");
-         }
-       }
-       else if (query_data.startsWith("off_")) {
-         int z = query_data.substring(4).toInt();
-         forceZoneStop(z);
-         bot.sendMessage(chat_id, "⏹ Зупинка: <b>" + String(zones[z].name) + "</b>", "HTML");
-       }
-       // МЕНЮ НАЛАШТУВАНЬ
-       else if (query_data == "settings_main") {
-         String keyboardJson = "[";
-         String modeBtnText = (currentSystemMode == MODE_AUTO) ? "🔄 Перейти в РУЧНИЙ" : "🔄 Перейти в АВТО";
-         keyboardJson += "[{\"text\": \"" + modeBtnText + "\", \"callback_data\": \"toggle_mode\"}],";
-         
-         for (int j = 0; j < NUM_ZONES; j++) {
-           keyboardJson += "[{\"text\": \"⚙️ " + String(zones[j].name) + "\", \"callback_data\": \"edit_z" + String(j) + "\"}],";
-         }
-         keyboardJson += "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"main_menu\"}]";
-         keyboardJson += "]";
-         bot.sendMessageWithInlineKeyboard(chat_id, "Налаштування системи:", "HTML", keyboardJson);
-       }
-       else if (query_data == "toggle_mode") {
-          currentSystemMode = (currentSystemMode == MODE_AUTO) ? MODE_MANUAL : MODE_AUTO;
-          saveSettings();
-          String modeMsg = (currentSystemMode == MODE_AUTO) ? "✅ Система в АВТО режимі." : "⚠️ Система в РУЧНОМУ режимі.";
-          bot.sendMessage(chat_id, modeMsg, "");
-          gotoMainMenu(chat_id);
-       }
-       else if (query_data.startsWith("edit_z")) {
-         targetZone = query_data.substring(6).toInt();
-         String keyboardJson = "["
-           "[{\"text\": \"🏷 Назва\", \"callback_data\": \"set_name\"}],"
-           "[{\"text\": \"📉 MIN (" + String(zones[targetZone].min) + "%)\", \"callback_data\": \"set_min\"}],"
-           "[{\"text\": \"📈 MAX (" + String(zones[targetZone].max) + "%)\", \"callback_data\": \"set_max\"}],"
-           "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"settings_main\"}]"
-           "]";
-         bot.sendMessageWithInlineKeyboard(chat_id, "Редагування <b>" + String(zones[targetZone].name) + "</b>:", "HTML", keyboardJson);
-       }
-       else if (query_data == "set_name") { currentState = SET_NAME; bot.sendMessage(chat_id, "Введіть нову назву:", ""); }
-       else if (query_data == "set_min") { currentState = SET_MIN; bot.sendMessage(chat_id, "Введіть MIN вологість:", ""); }
-       else if (query_data == "set_max") { currentState = SET_MAX; bot.sendMessage(chat_id, "Введіть MAX вологість:", ""); }
-       else if (query_data == "main_menu") { gotoMainMenu(chat_id); }
+       else if (q.startsWith("off_")) forceZoneStop(q.substring(4).toInt());
        
+       else if (q == "settings_main") {
+         String kb = "[";
+         kb += "[{\"text\": \"" + String(currentSystemMode==MODE_AUTO?"🔄 В РУЧНИЙ":"🔄 В АВТО") + "\", \"callback_data\": \"toggle_mode\"}],";
+         kb += "[{\"text\": \"⏱ ТАЙМІНГИ\", \"callback_data\": \"settings_time\"}],";
+         for (int j = 0; j < NUM_ZONES; j++) kb += "[{\"text\": \"⚙️ " + String(zones[j].name) + "\", \"callback_data\": \"edit_z" + String(j) + "\"}],";
+         kb += "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"main_menu\"}]]";
+         bot.sendMessageWithInlineKeyboard(chat_id, "Налаштування:", "HTML", kb);
+       }
+       else if (q == "toggle_mode") { currentSystemMode = (currentSystemMode == MODE_AUTO) ? MODE_MANUAL : MODE_AUTO; saveSettings(); gotoMainMenu(chat_id); }
+       else if (q == "settings_time") {
+         if (currentSystemMode == MODE_AUTO) {
+           String kb = "[";
+           kb += "[{\"text\": \"⚙️ Відкриття: " + String(valveOpenDelay) + "мс\", \"callback_data\":\"t_open\"}],";
+           kb += "[{\"text\": \"⚙️ Закриття: " + String(valveCloseDelay) + "мс\", \"callback_data\":\"t_close\"}],";
+           kb += "[{\"text\": \"⚙️ Черга: " + String(queueDelay) + "мс\", \"callback_data\":\"t_queue\"}],";
+           kb += "[{\"text\": \"⚙️ Перевірка: " + String(sensorVerifyTime) + "мс\", \"callback_data\":\"t_verify\"}],";
+           kb += "[{\"text\": \"⚙️ Звіти: " + String(reportInterval / 60000) + "хв\", \"callback_data\":\"t_report\"}],";
+           kb += "[{\"text\": \"⚙️ LCD: " + String(lcdInterval) + "мс\", \"callback_data\":\"t_lcd\"}],";
+           kb += "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"settings_main\"}]]";
+           bot.sendMessageWithInlineKeyboard(chat_id, "Таймери (АВТО):", "HTML", kb);
+         } else bot.sendMessage(chat_id, "⚠️ Таймінги налаштовуються лише в АВТО!", "");
+       }
+       else if (q.startsWith("edit_z")) {
+         targetZone = q.substring(6).toInt();
+         String kb = "[";
+         kb += "[{\"text\":\"🏷 Ім'я: " + String(zones[targetZone].name) + "\",\"callback_data\":\"set_name\"}],";
+         kb += "[{\"text\":\"📉 MIN: " + String(zones[targetZone].min) + "%\",\"callback_data\":\"set_min\"}],";
+         kb += "[{\"text\":\"📈 MAX: " + String(zones[targetZone].max) + "%\",\"callback_data\":\"set_max\"}],";
+         kb += "[{\"text\":\"⬅️ Назад\",\"callback_data\":\"settings_main\"}]";
+         kb += "]";
+         bot.sendMessageWithInlineKeyboard(chat_id, "Зона " + String(targetZone + 1), "HTML", kb);
+       }
+       else if (q == "set_name") { currentState = SET_NAME; bot.sendMessage(chat_id, "Введіть назву:", ""); }
+       else if (q == "set_min")  { currentState = SET_MIN;  bot.sendMessage(chat_id, "Введіть MIN (%):", ""); }
+       else if (q == "set_max")  { currentState = SET_MAX;  bot.sendMessage(chat_id, "Введіть MAX (%):", ""); }
+       else if (q == "t_open")   { currentState = SET_T_OPEN; bot.sendMessage(chat_id, "Час відкриття (мс):", ""); }
+       else if (q == "t_close")  { currentState = SET_T_CLOSE; bot.sendMessage(chat_id, "Час закриття (мс):", ""); }
+       else if (q == "t_queue")  { currentState = SET_T_QUEUE; bot.sendMessage(chat_id, "Пауза черги (мс):", ""); }
+       else if (q == "t_verify") { currentState = SET_T_VERIFY; bot.sendMessage(chat_id, "Час перевірки (мс):", ""); }
+       else if (q == "t_report") { currentState = SET_T_REPORT; bot.sendMessage(chat_id, "Інтервал звітів (мс):", ""); }
+       else if (q == "t_lcd")    { currentState = SET_T_LCD; bot.sendMessage(chat_id, "Швидкість LCD (мс):", ""); }
+       else if (q == "main_menu") gotoMainMenu(chat_id);
        bot.answerCallbackQuery(bot.messages[i].query_id, "");
     }
   }
@@ -323,10 +233,7 @@ void handleMessages(int numNewMessages) {
 void handleTelegram() {
   if (millis() - lastBotRun > 1000) { 
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-    while (numNewMessages) {
-      handleMessages(numNewMessages);
-      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-    }
+    while (numNewMessages) { handleMessages(numNewMessages); numNewMessages = bot.getUpdates(bot.last_message_received + 1); }
     lastBotRun = millis();
   }
 }

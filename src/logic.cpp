@@ -132,7 +132,7 @@ void updateWateringLogic() {
             verifyTimers[i] = currentMillis; 
             Serial.printf("Z%d: Start verification. Moisture: %d%%\n", i+1, moisture);
           } 
-          else if (currentMillis - verifyTimers[i] >= SENSOR_VERIFY_TIME) {
+          else if (currentMillis - verifyTimers[i] >= sensorVerifyTime) { // 🔄 Змінено
              verifyTimers[i] = 0; 
              zoneStates[i] = STATE_WAITING; 
              sendTelegramMessage(zones[i].topicID, "⚠️ <b>Критично сухо!</b> (" + String(moisture) + "%)\nПочинаю цикл поливу...");
@@ -154,10 +154,10 @@ void updateWateringLogic() {
         break;
 
       case STATE_OPENING:
-        if (currentMillis - zoneTimers[i] >= VALVE_OPEN_DELAY) {
+        if (currentMillis - zoneTimers[i] >= valveOpenDelay) { // 🔄 Змінено
           zoneStates[i] = STATE_WATERING; 
           zoneTimers[i] = currentMillis;
-          nextAllowedActionTime = currentMillis + QUEUE_DELAY; 
+          nextAllowedActionTime = currentMillis + queueDelay; // 🔄 Змінено
           sendTelegramMessage(zones[i].topicID, "💦 <b>Полив СТАРТ!</b>\nТривалість: " + String(zones[i].wateringTime / 60000) + " хв");
         }
         break;
@@ -171,7 +171,7 @@ void updateWateringLogic() {
         break;
 
       case STATE_CLOSING:
-        if (currentMillis - zoneTimers[i] >= VALVE_CLOSE_DELAY) {
+        if (currentMillis - zoneTimers[i] >= valveCloseDelay) { // 🔄 Змінено
           digitalWrite(zones[i].relayPin, HIGH); 
           
           struct tm timeinfo;
@@ -185,7 +185,7 @@ void updateWateringLogic() {
 
           zoneStates[i] = (currentSystemMode == MODE_AUTO) ? STATE_ANALYZING : STATE_IDLE;
           zoneTimers[i] = currentMillis;
-          nextAllowedActionTime = currentMillis + QUEUE_DELAY; 
+          nextAllowedActionTime = currentMillis + queueDelay; // 🔄 Змінено
           
           if (currentSystemMode == MODE_AUTO)
             sendTelegramMessage(zones[i].topicID, "✅ <b>Полив СТОП.</b>\nКлапан закрито. Чекаю вбирання...");

@@ -6,6 +6,16 @@ Preferences preferences; // Об'єкт для збереження даних
 // 👇 НОВЕ: Змінна режиму системи (Авто за замовчуванням)
 SystemMode currentSystemMode = MODE_AUTO;
 
+// 👇 НОВЕ: Оголошення змінних таймінгів (ініціалізуємо дефолтними значеннями з config.h)
+unsigned long valveOpenDelay     = DEF_VALVE_OPEN_DELAY;
+unsigned long valveCloseDelay    = DEF_VALVE_CLOSE_DELAY;
+unsigned long queueDelay         = DEF_QUEUE_DELAY;
+unsigned long sensorVerifyTime   = DEF_SENSOR_VERIFY;
+unsigned long startupReportDelay = DEF_STARTUP_DELAY;
+unsigned long reportInterval     = DEF_REPORT_INTERVAL;
+unsigned long sampleInterval     = DEF_SAMPLE_INTERVAL;
+unsigned long lcdInterval        = DEF_LCD_INTERVAL;
+
 // ==========================================
 // 🔐 ТУТ ЖИВУТЬ ПАРОЛІ ТА НАЛАШТУВАННЯ
 // ==========================================
@@ -27,7 +37,6 @@ const char* adminChatIds[MAX_ADMINS] = {
 const int numAdmins = 1; 
 
 // Ініціалізація масиву зон (Заводські налаштування)
-// ⚠️ ДОДАНО: Час останнього поливу ("--:--") та статус Enabled (true)
 Zone zones[NUM_ZONES] = {
   // Name (max 29 chars)  Sens Relay Min Max  Dry   Wet     Water  Soak    Topic  LastTime Enabled
   {"Hamedoreya",          34,  16,   40, 80,  3391, 1073,   60000, 60000,  5,     "--:--", true}, 
@@ -42,7 +51,7 @@ Zone zones[NUM_ZONES] = {
 
 // Зберегти поточні налаштування у вічну пам'ять
 void saveSettings() {
-  preferences.begin("garden-v4", false); // 👈 ЗМІНЕНО НА v4 (режим запису)
+  preferences.begin("garden-v4", false); 
   
   // Записуємо весь масив зон одним махом
   preferences.putBytes("zones", zones, sizeof(zones));
@@ -50,25 +59,46 @@ void saveSettings() {
   // Записуємо режим системи
   preferences.putInt("sysMode", (int)currentSystemMode);
   
+  // 👇 НОВЕ: Зберігаємо таймінги
+  preferences.putULong("t_v_open", valveOpenDelay);
+  preferences.putULong("t_v_close", valveCloseDelay);
+  preferences.putULong("t_queue", queueDelay);
+  preferences.putULong("t_verify", sensorVerifyTime);
+  preferences.putULong("t_startup", startupReportDelay);
+  preferences.putULong("t_report", reportInterval);
+  preferences.putULong("t_sample", sampleInterval);
+  preferences.putULong("t_lcd", lcdInterval);
+
   preferences.end();
-  Serial.println("💾 НАЛАШТУВАННЯ ТА РЕЖИМ ЗБЕРЕЖЕНО В ПАМ'ЯТЬ (v4)!");
+  Serial.println("💾 НАЛАШТУВАННЯ ТА ТАЙМІНГИ ЗБЕРЕЖЕНО (v4)!");
 }
 
 // Завантажити налаштування при старті
 void loadSettings() {
-  preferences.begin("garden-v4", true); // 👈 ЗМІНЕНО НА v4 (тільки читання)
+  preferences.begin("garden-v4", true); // Тільки читання
   
   // Перевіряємо, чи є збережені дані зон
   if (preferences.isKey("zones")) {
     preferences.getBytes("zones", zones, sizeof(zones));
-    Serial.println("📂 НАЛАШТУВАННЯ ЗАВАНТАЖЕНО З ПАМ'ЯТІ (v4)!");
+    Serial.println("📂 ЗОНИ ЗАВАНТАЖЕНО З ПАМ'ЯТІ (v4)!");
   } else {
     Serial.println("⚠️ Пам'ять зон порожня. Використовуються заводські налаштування.");
   }
   
-  // Завантажуємо режим системи (якщо немає - MODE_AUTO)
+  // Завантажуємо режим системи
   int savedMode = preferences.getInt("sysMode", (int)MODE_AUTO);
   currentSystemMode = (SystemMode)savedMode;
+  
+  // 👇 НОВЕ: Завантажуємо таймінги (якщо немає в пам'яті - беремо дефолтні)
+  valveOpenDelay     = preferences.getULong("t_v_open", DEF_VALVE_OPEN_DELAY);
+  valveCloseDelay    = preferences.getULong("t_v_close", DEF_VALVE_CLOSE_DELAY);
+  queueDelay         = preferences.getULong("t_queue", DEF_QUEUE_DELAY);
+  sensorVerifyTime   = preferences.getULong("t_verify", DEF_SENSOR_VERIFY);
+  startupReportDelay = preferences.getULong("t_startup", DEF_STARTUP_DELAY);
+  reportInterval     = preferences.getULong("t_report", DEF_REPORT_INTERVAL);
+  sampleInterval     = preferences.getULong("t_sample", DEF_SAMPLE_INTERVAL);
+  lcdInterval        = preferences.getULong("t_lcd", DEF_LCD_INTERVAL);
+  
   Serial.print("📂 ПОТОЧНИЙ РЕЖИМ: ");
   Serial.println(currentSystemMode == MODE_AUTO ? "AUTO" : "MANUAL");
   

@@ -35,15 +35,27 @@ extern const int numAdmins;
 // 👇 НОВЕ: Адреса датчика BME280 (зазвичай 0x76 або 0x77)
 #define BME_INNER_ADDR 0x76 
 
-// --- ⏱ ТАЙМІНГИ ---
-#define VALVE_OPEN_DELAY 5000      
-#define VALVE_CLOSE_DELAY 2000     
-#define QUEUE_DELAY      5000      
-#define SENSOR_VERIFY_TIME 30000   
-#define STARTUP_REPORT_DELAY 60000 
-#define REPORT_INTERVAL     3600000  
-#define SAMPLE_INTERVAL 1000       
-#define LCD_INTERVAL    3000       // Змінив на 3000, щоб екрани не мигтіли занадто швидко (було 20000 - це задовго)
+// --- ⏱ ТАЙМІНГИ (Змінено на змінні для налаштування) ---
+
+// 1. Дефолтні значення (використовуються при першому запуску або скиданні)
+#define DEF_VALVE_OPEN_DELAY 5000      
+#define DEF_VALVE_CLOSE_DELAY 2000     
+#define DEF_QUEUE_DELAY      5000      
+#define DEF_SENSOR_VERIFY    30000   
+#define DEF_STARTUP_DELAY    60000 
+#define DEF_REPORT_INTERVAL  3600000  
+#define DEF_SAMPLE_INTERVAL  1000       
+#define DEF_LCD_INTERVAL     3000       
+
+// 2. Глобальні змінні (тепер їх можна змінювати через Telegram)
+extern unsigned long valveOpenDelay;
+extern unsigned long valveCloseDelay;
+extern unsigned long queueDelay;
+extern unsigned long sensorVerifyTime;
+extern unsigned long startupReportDelay;
+extern unsigned long reportInterval;
+extern unsigned long sampleInterval;
+extern unsigned long lcdInterval;
 
 struct Zone {
   char name[30];         
