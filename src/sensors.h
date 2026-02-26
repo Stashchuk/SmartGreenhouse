@@ -10,3 +10,6 @@ void getAverageClimate(float &t, float &h, float &p);
 void resetSensorAverages();
 bool isBmeWorking();
 void lcdPrintStatus(String status); // Для виводу WiFi статусу при старті
+
+// 👇 ДОДАНО: Прототип для функції рухомого рядка (marquee)
+String getMarqueeText(String text, int width);

@@ -18,8 +18,9 @@ const char* topic_z4_hum = "stashchuk/gh/zone4/hum";
 WiFiClient espClient;
 PubSubClient mqtt(espClient);
 
+//інтервал передачі на графики
 unsigned long lastMqttPublish = 0;
-#define MQTT_INTERVAL 60000
+#define MQTT_INTERVAL 50000
 
 void setupMQTT() {
   mqtt.setServer(mqtt_server, mqtt_port);

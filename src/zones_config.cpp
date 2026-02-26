@@ -41,7 +41,7 @@ Zone zones[NUM_ZONES] = {
 
 // Зберегти поточні налаштування у вічну пам'ять
 void saveSettings() {
-  preferences.begin("garden-data", false); // Відкриваємо комірку пам'яті (false = режим запису)
+  preferences.begin("garden-v3", false); // Відкриваємо комірку пам'яті (false = режим запису)
   
   // Записуємо весь масив зон одним махом
   preferences.putBytes("zones", zones, sizeof(zones));
@@ -55,7 +55,7 @@ void saveSettings() {
 
 // Завантажити налаштування при старті
 void loadSettings() {
-  preferences.begin("garden-data", true); // Відкриваємо (true = тільки читання)
+  preferences.begin("garden-v3", true); // Відкриваємо (true = тільки читання)
   
   // Перевіряємо, чи є збережені дані зон
   if (preferences.isKey("zones")) {

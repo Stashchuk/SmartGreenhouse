@@ -11,6 +11,11 @@ unsigned long nextAllowedActionTime = 0;
 // Змінна для відстеження часу останнього нагадування
 unsigned long lastManualNotify[NUM_ZONES] = {0, 0, 0, 0};
 
+// 👇 НОВЕ: Функція для дисплея, щоб знати чи працює насос
+bool isPumpActive() {
+    return (digitalRead(PUMP_PIN) == LOW); // LOW = Увімкнено (Low level trigger)
+}
+
 void setupLogic() {
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, HIGH); 
@@ -21,6 +26,8 @@ void setupLogic() {
     zoneStates[i] = STATE_IDLE;
     zoneTimers[i] = 0;
     verifyTimers[i] = 0;
+    // Ініціалізуємо час пустим значенням
+    strcpy(zones[i].lastWaterTime, "--:--");
   }
 }
 
@@ -47,13 +54,12 @@ void checkManualAlerts() {
     for (int i = 0; i < NUM_ZONES; i++) {
       if (zoneStates[i] == STATE_WATERING) {
         unsigned long activeTimeMin = (currentMillis - zoneTimers[i]) / 60000;
-        // Якщо працює більше 30 хв і ми ще не нагадували про цей 30-хвилинний відрізок
         if (activeTimeMin >= 30 && (activeTimeMin / 30) > (lastManualNotify[i] / 30)) {
            lastManualNotify[i] = activeTimeMin;
            sendTelegramMessage(TOPIC_MAIN, "⚠️ <b>УВАГА!</b>\nЗона <b>" + String(zones[i].name) + "</b> поливає вже " + String(activeTimeMin) + " хв!\nНе забудьте вимкнути.");
         }
       } else {
-        lastManualNotify[i] = 0; // Скидаємо, якщо не поливає
+        lastManualNotify[i] = 0;
       }
     }
   }
@@ -63,7 +69,6 @@ void updateWateringLogic() {
   unsigned long currentMillis = millis();
   bool isPumpNeeded = false; 
   
-  // Викликаємо нагадування
   checkManualAlerts();
 
   bool isMechanismBusy = false;
@@ -81,7 +86,6 @@ void updateWateringLogic() {
 
     switch (zoneStates[i]) {
       case STATE_IDLE:
-        // 👇 ДОДАНО ЗАХИСТ: Автоматика працює тільки в MODE_AUTO
         if (currentSystemMode == MODE_AUTO && moisture < zones[i].min) {
           if (verifyTimers[i] == 0) {
             verifyTimers[i] = currentMillis; 
@@ -119,7 +123,6 @@ void updateWateringLogic() {
 
       case STATE_WATERING:
         isPumpNeeded = true; 
-        // В автоматичному режимі зупиняємо по таймеру. В ручному - поливаємо доки не скасують.
         if (currentSystemMode == MODE_AUTO && (currentMillis - zoneTimers[i] >= zones[i].wateringTime)) {
           zoneStates[i] = STATE_CLOSING; 
           zoneTimers[i] = currentMillis;
@@ -129,9 +132,17 @@ void updateWateringLogic() {
       case STATE_CLOSING:
         if (currentMillis - zoneTimers[i] >= VALVE_CLOSE_DELAY) {
           digitalWrite(zones[i].relayPin, HIGH); 
+          
+          // 👇 НОВЕ: Записуємо час завершення поливу для дисплея
+          struct tm timeinfo;
+          if(getLocalTime(&timeinfo)) {
+            strftime(zones[i].lastWaterTime, 6, "%H:%M", &timeinfo);
+          }
+
           zoneStates[i] = (currentSystemMode == MODE_AUTO) ? STATE_ANALYZING : STATE_IDLE;
           zoneTimers[i] = currentMillis;
           nextAllowedActionTime = currentMillis + QUEUE_DELAY; 
+          
           if (currentSystemMode == MODE_AUTO)
             sendTelegramMessage(zones[i].topicID, "✅ <b>Полив СТОП.</b>\nКлапан закрито. Чекаю вбирання...");
           else
@@ -140,7 +151,7 @@ void updateWateringLogic() {
         break;
 
       case STATE_ANALYZING:
-        if (currentSystemMode == MODE_MANUAL) { zoneStates[i] = STATE_IDLE; break; } // Якщо перемкнули в ручний - виходимо зі стану
+        if (currentSystemMode == MODE_MANUAL) { zoneStates[i] = STATE_IDLE; break; }
         if (currentMillis - zoneTimers[i] >= zones[i].soakingTime) {
           if (moisture < zones[i].max) {
              zoneStates[i] = STATE_WAITING; 
@@ -169,12 +180,11 @@ bool isZoneActive(int i) {
 
 void forceZoneStart(int i) {
   if (i < 0 || i >= NUM_ZONES) return;
-  // Дозволяємо ручний пуск ТІЛЬКИ в ручному режимі (як ми домовлялися)
   if (currentSystemMode == MODE_MANUAL && zoneStates[i] == STATE_IDLE) {
      verifyTimers[i] = 0;
      zoneStates[i] = STATE_OPENING; 
      zoneTimers[i] = millis();
-     lastManualNotify[i] = 0; // Скидаємо лічильник нагадувань
+     lastManualNotify[i] = 0;
      digitalWrite(zones[i].relayPin, LOW);
      Serial.printf("MANUAL: Start Zone %d\n", i+1);
   }

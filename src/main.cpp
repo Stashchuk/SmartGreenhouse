@@ -12,6 +12,7 @@ bool startupReportSent = false;
 void setup() {
   Serial.begin(115200);
   loadSettings(); // <--- 🆕 ДОДАЙ ЦЕЙ РЯДОК (Завантаження пам'яті)
+  saveSettings(); // ЗАПИШЕ ТВОЇ ПРАВИЛЬНІ ДАНІ (Hamedoreya, Happiness тощо) поверх сміття
   pinMode(LED_PIN, OUTPUT);
   
   setupSensors();
