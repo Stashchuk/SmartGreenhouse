@@ -27,7 +27,9 @@ void setupLogic() {
     zoneTimers[i] = 0;
     verifyTimers[i] = 0;
     // Ініціалізуємо час пустим значенням
-    strcpy(zones[i].lastWaterTime, "--:--");
+    if (strlen(zones[i].lastWaterTime) == 0) {
+        strcpy(zones[i].lastWaterTime, "--:--");
+    }
   }
 }
 
@@ -133,11 +135,18 @@ void updateWateringLogic() {
         if (currentMillis - zoneTimers[i] >= VALVE_CLOSE_DELAY) {
           digitalWrite(zones[i].relayPin, HIGH); 
           
-          // 👇 НОВЕ: Записуємо час завершення поливу для дисплея
+          // 👇 ЗМІНЕНО: Записуємо час завершення поливу
           struct tm timeinfo;
           if(getLocalTime(&timeinfo)) {
             strftime(zones[i].lastWaterTime, 6, "%H:%M", &timeinfo);
+          } else {
+             // Якщо часу немає (нема інтернету), ставимо ?? щоб не було пусто
+             strcpy(zones[i].lastWaterTime, "??:??");
           }
+
+          // 👇 ДОДАНО: Зберігаємо налаштування в пам'ять!
+          // Це виправить проблему зникнення часу після вимкнення світла
+          saveSettings();
 
           zoneStates[i] = (currentSystemMode == MODE_AUTO) ? STATE_ANALYZING : STATE_IDLE;
           zoneTimers[i] = currentMillis;

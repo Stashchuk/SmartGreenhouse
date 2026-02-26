@@ -10,3 +10,5 @@ void sendTelegramMessage(int topicID, String text);
 void sendReport(bool isStartup);
 unsigned long getTotalOfflineTime(); // Функція для отримання часу офлайну
 void handleTelegram(); // <--- ДОДАТИ ЦЕЙ РЯДОК
+String getUptime();
+String getWifiQuality();

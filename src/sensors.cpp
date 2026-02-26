@@ -1,9 +1,11 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_BME280.h>
+#include <WiFi.h> 
 #include "config.h"
 #include "sensors.h"
-#include "logic.h" // Потрібно знати стани зон для відображення на LCD
+#include "logic.h" 
+#include "network.h"
 
 LiquidCrystal_I2C lcd(0x27, 16, 2); 
 TwoWire I2C_SENSOR = TwoWire(1);
@@ -17,12 +19,11 @@ unsigned long lastSampleTime = 0;
 unsigned long lastLcdTime = 0;
 int currentZoneDisp = 0;
 
-// 👇 НОВЕ: Функція для рухомого рядка (marquee)
+// 👇 Функція для рухомого рядка
 String getMarqueeText(String text, int width) {
   if (text.length() <= width) return text;
-  // Додаємо пробіли між повторами для чіткості
   String displayString = text + "   "; 
-  int offset = (millis() / 400) % displayString.length(); // Швидкість зсуву
+  int offset = (millis() / 350) % displayString.length(); 
   String result = displayString.substring(offset) + displayString.substring(0, offset);
   return result.substring(0, width);
 }
@@ -83,64 +84,92 @@ void resetSensorAverages() {
     sumTemp = 0; sumHumAir = 0; sumPress = 0; sampleCount = 0;
 }
 
-// 🛠 ОНОВЛЕНА ФУНКЦІЯ LCD: Додано рухомий рядок та нові цикли
+// 🛠 ОНОВЛЕНА ФУНКЦІЯ LCD
 void updateLcdLoop() {
-  static int screen = 0; // 👈 ВИПРАВЛЕНО: Винесено на початок функції, щоб змінна була доступна скрізь
+  static int screen = 0; 
+  static unsigned long lastMarqueeUpdate = 0; 
   
   if (millis() - lastLcdTime > LCD_INTERVAL) {
     lastLcdTime = millis();
     lcd.clear();
     
     char modeChar = (currentSystemMode == MODE_AUTO) ? 'A' : 'M';
-    String pumpMark = isPumpActive() ? "P" : " "; 
-
+    
+    // --- ЕКРАНИ ЗОН (0, 1, 2, 3) ---
     if (screen < NUM_ZONES) { 
-      // --- ЕКРАНИ ЗОН (Цикли 0-3) ---
       int i = screen;
-      ZoneState state = getZoneState(i);
       
-      // Рядок 1: Z1:Назва [Режим]
       lcd.setCursor(0, 0);
-      String nameMarquee = getMarqueeText(String(zones[i].name), 11);
-      lcd.print("Z" + String(i + 1) + ":" + nameMarquee);
+      lcd.print("Z" + String(i + 1) + ":"); 
       lcd.setCursor(13, 0);
       lcd.print("[" + String(modeChar) + "]");
       
-      // Рядок 2: M:45% V:OPEN [P]
       lcd.setCursor(0, 1);
-      String valveStatus = (digitalRead(zones[i].relayPin) == LOW) ? "OPEN" : "CLOS";
-      lcd.print("M:" + String(getPercent(i)) + "% V:" + valveStatus);
-      if (isPumpActive()) {
-        lcd.setCursor(14, 1);
-        lcd.print("[P]");
-      }
+      lcd.print("M:" + String(getPercent(i)) + "% ");
+      
+      String vStatus = (digitalRead(zones[i].relayPin) == LOW) ? "ON " : "OFF";
+      lcd.print("V:" + vStatus);
+      
+      String pStatus = isPumpActive() ? "ON" : "OF";
+      lcd.print("P:" + pStatus);
     } 
+    // --- ЕКРАН КЛІМАТУ (4) ---
     else if (screen == 4) { 
-      // --- ЕКРАН КЛІМАТУ ---
       float t, h, p;
       getAverageClimate(t, h, p);
       lcd.setCursor(0, 0);
-      lcd.print("T:" + String(t, 1) + "C H:" + String(h, 0) + "%");
+      lcd.print("Temp: " + String(t, 1) + "C");
       lcd.setCursor(0, 1);
-      lcd.print("P:" + String((int)p) + "mmHg   [" + String(modeChar) + "]");
+      lcd.print("Hum: " + String(h, 0) + "% P:" + String((int)p));
     } 
+    // --- ЕКРАН ЧАСУ (5) ---
     else if (screen == 5) {
-      // --- ЕКРАН ОСТАННЬОГО ПОЛИВУ ---
       lcd.setCursor(0, 0);
-      lcd.print("LST: " + String(zones[0].lastWaterTime) + " | " + String(zones[1].lastWaterTime));
+      lcd.print("1:" + String(zones[0].lastWaterTime) + " 2:" + String(zones[1].lastWaterTime));
       lcd.setCursor(0, 1);
-      lcd.print("     " + String(zones[2].lastWaterTime) + " | " + String(zones[3].lastWaterTime));
+      lcd.print("3:" + String(zones[2].lastWaterTime) + " 4:" + String(zones[3].lastWaterTime));
+    }
+    // --- ЕКРАН WIFI (6) - ВИПРАВЛЕНО ---
+    else if (screen == 6) {
+      // 👇 Використовуємо буфер для чистого тексту (це прибере "сміття" на екрані)
+      char buf[17]; 
+
+      // 1. Рахуємо WiFi
+      int rssi = WiFi.RSSI();
+      int qual = 0;
+      if (rssi <= -100) qual = 0;
+      else if (rssi >= -50) qual = 100;
+      else qual = 2 * (rssi + 100);
+      
+      lcd.setCursor(0, 0);
+      // Форматуємо рядок типу "WiFi: 86% -55dB"
+      snprintf(buf, 17, "WiFi:%d%% %ddB", qual, rssi);
+      lcd.print(buf);
+
+      // 2. Рахуємо Uptime (локально, щоб не залежати від інших файлів)
+      unsigned long ms = millis();
+      unsigned long days = ms / 86400000;
+      unsigned long hours = (ms % 86400000) / 3600000;
+      unsigned long mins = (ms % 3600000) / 60000;
+      
+      lcd.setCursor(0, 1);
+      // Форматуємо рядок типу "Up: 1d 04h 25m"
+      snprintf(buf, 17, "Up: %lud %02luh %02lum", days, hours, mins);
+      lcd.print(buf);
     }
 
-    screen = (screen + 1) % 6; 
-  } else {
-    // 👇 Плавний рух тексту між великими оновленнями екрана
-    if (screen < NUM_ZONES) {
-      int i = screen;
-      if (String(zones[i].name).length() > 11) {
-        lcd.setCursor(3, 0); // Позиція початку назви після "Z1:"
-        lcd.print(getMarqueeText(String(zones[i].name), 11));
-      }
+    screen = (screen + 1) % 7; 
+  } 
+
+  // Оновлення рухомого рядка
+  if (millis() - lastMarqueeUpdate > 300) {
+    lastMarqueeUpdate = millis();
+    // Оновлюємо тільки якщо на екрані зона (щоб не псувати інші екрани)
+    int currentDisplayedZone = (screen == 0) ? 6 : screen - 1;
+
+    if (currentDisplayedZone < NUM_ZONES) {
+        lcd.setCursor(3, 0); 
+        lcd.print(getMarqueeText(String(zones[currentDisplayedZone].name), 9));
     }
   }
 }
