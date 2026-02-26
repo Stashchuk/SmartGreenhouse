@@ -11,9 +11,31 @@ unsigned long nextAllowedActionTime = 0;
 // Змінна для відстеження часу останнього нагадування
 unsigned long lastManualNotify[NUM_ZONES] = {0, 0, 0, 0};
 
-// 👇 НОВЕ: Функція для дисплея, щоб знати чи працює насос
 bool isPumpActive() {
-    return (digitalRead(PUMP_PIN) == LOW); // LOW = Увімкнено (Low level trigger)
+    return (digitalRead(PUMP_PIN) == LOW); 
+}
+
+// 👇 НОВЕ: Функція перевірки води (поки що заглушка, повертає true)
+// Коли підключиш датчик, тут буде реальна перевірка
+bool isWaterAvailable() {
+    // int level = getWaterLevelPercent(); 
+    // if (level < MIN_WATER_LEVEL && level != -1) return false;
+    return true; 
+}
+
+// 👇 НОВЕ: Функція зміни статусу зони (ВКЛ/ВИКЛ)
+void setZoneEnable(int i, bool state) {
+  if (i < 0 || i >= NUM_ZONES) return;
+  
+  zones[i].enabled = state;
+  
+  // Якщо вимкнули зону під час її роботи - зупиняємо
+  if (!state && zoneStates[i] != STATE_IDLE) {
+    forceZoneStop(i);
+    zoneStates[i] = STATE_IDLE;
+  }
+  
+  saveSettings(); // Зберігаємо налаштування
 }
 
 void setupLogic() {
@@ -26,7 +48,7 @@ void setupLogic() {
     zoneStates[i] = STATE_IDLE;
     zoneTimers[i] = 0;
     verifyTimers[i] = 0;
-    // Ініціалізуємо час пустим значенням
+    
     if (strlen(zones[i].lastWaterTime) == 0) {
         strcpy(zones[i].lastWaterTime, "--:--");
     }
@@ -38,6 +60,9 @@ unsigned long getZoneTimer(int i) { return zoneTimers[i]; }
 unsigned long getVerifyTimer(int i) { return verifyTimers[i]; }
 
 String getZoneStatusText(int i, int currentMoisture) {
+    // 👇 Якщо зона вимкнена - повертаємо відповідний статус
+    if (!zones[i].enabled) return "⛔ (ВИМКНЕНО)";
+
     if (zoneStates[i] == STATE_WATERING) return "💦 (Полив)";
     if (zoneStates[i] == STATE_ANALYZING) return "⏳ (Вбирання)";
     if (zoneStates[i] == STATE_WAITING) return "🕒 (В черзі)";
@@ -49,7 +74,6 @@ String getZoneStatusText(int i, int currentMoisture) {
     return "✅ (Норма)";
 }
 
-// Функція перевірки довгих поливів у ручному режимі
 void checkManualAlerts() {
   if (currentSystemMode == MODE_MANUAL) {
     unsigned long currentMillis = millis();
@@ -72,6 +96,15 @@ void updateWateringLogic() {
   bool isPumpNeeded = false; 
   
   checkManualAlerts();
+  
+  // 👇 ГЛОБАЛЬНИЙ ЗАХИСТ ВІД СУХОГО ХОДУ
+  if (!isWaterAvailable()) {
+      if (isPumpActive()) {
+          stopAllZones();
+          sendTelegramMessage(TOPIC_MAIN, "🚨 <b>АВАРІЯ! НЕМАЄ ВОДИ!</b>\nНасос зупинено.");
+      }
+      return; 
+  }
 
   bool isMechanismBusy = false;
   for (int j = 0; j < NUM_ZONES; j++) {
@@ -84,6 +117,12 @@ void updateWateringLogic() {
   bool isQueueLocked = (currentMillis < nextAllowedActionTime);
 
   for (int i = 0; i < NUM_ZONES; i++) {
+    // 👇 ЯКЩО ЗОНА ВИМКНЕНА - ПРОПУСКАЄМО ЇЇ
+    if (!zones[i].enabled) {
+        zoneStates[i] = STATE_IDLE; 
+        continue; 
+    }
+
     int moisture = getPercent(i);
 
     switch (zoneStates[i]) {
@@ -135,17 +174,13 @@ void updateWateringLogic() {
         if (currentMillis - zoneTimers[i] >= VALVE_CLOSE_DELAY) {
           digitalWrite(zones[i].relayPin, HIGH); 
           
-          // 👇 ЗМІНЕНО: Записуємо час завершення поливу
           struct tm timeinfo;
           if(getLocalTime(&timeinfo)) {
             strftime(zones[i].lastWaterTime, 6, "%H:%M", &timeinfo);
           } else {
-             // Якщо часу немає (нема інтернету), ставимо ?? щоб не було пусто
              strcpy(zones[i].lastWaterTime, "??:??");
           }
 
-          // 👇 ДОДАНО: Зберігаємо налаштування в пам'ять!
-          // Це виправить проблему зникнення часу після вимкнення світла
           saveSettings();
 
           zoneStates[i] = (currentSystemMode == MODE_AUTO) ? STATE_ANALYZING : STATE_IDLE;
@@ -179,16 +214,25 @@ void updateWateringLogic() {
   else digitalWrite(PUMP_PIN, HIGH);
 }
 
-// ==========================================
-// 🎮 РУЧНЕ КЕРУВАННЯ
-// ==========================================
-
 bool isZoneActive(int i) {
   return (zoneStates[i] != STATE_IDLE && zoneStates[i] != STATE_ANALYZING);
 }
 
 void forceZoneStart(int i) {
   if (i < 0 || i >= NUM_ZONES) return;
+  
+  // 👇 ЗАБОРОНЯЄМО РУЧНИЙ ПУСК, ЯКЩО ЗОНА ВИМКНЕНА
+  if (!zones[i].enabled) {
+      sendTelegramMessage(TOPIC_MAIN, "⛔ <b>Помилка:</b> Зона " + String(i+1) + " вимкнена в налаштуваннях!");
+      return;
+  }
+  
+  // 👇 ПЕРЕВІРКА ВОДИ
+  if (!isWaterAvailable()) {
+      sendTelegramMessage(TOPIC_MAIN, "❌ <b>Неможливо запустити: Немає води!</b>");
+      return;
+  }
+
   if (currentSystemMode == MODE_MANUAL && zoneStates[i] == STATE_IDLE) {
      verifyTimers[i] = 0;
      zoneStates[i] = STATE_OPENING; 

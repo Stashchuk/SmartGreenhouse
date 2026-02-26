@@ -7,39 +7,46 @@
 extern const char* ssid;
 extern const char* password;
 extern const char* BOTtoken;
-extern const char* CHAT_ID; // ID ГРУПИ (для звітів)
+extern const char* CHAT_ID; 
 
-// 👇 НОВЕ: Список адміністраторів (хто має право керувати)
-#define MAX_ADMINS 5            // Максимальна кількість адмінів
-extern const char* adminChatIds[MAX_ADMINS]; // Масив ID адмінів
-extern const int numAdmins;     // Реальна кількість адмінів
+#define MAX_ADMINS 5            
+extern const char* adminChatIds[MAX_ADMINS]; 
+extern const int numAdmins;     
 
-// ID гілок (Topics)
 #define TOPIC_MAIN    10   
 #define TOPIC_SERVICE 12   
 
 // ==========================================
 // ⚙️ НАЛАШТУВАННЯ ОБЛАДНАННЯ
 // ==========================================
-#define NUM_ZONES       4      // Кількість зон поливу (і датчиків вологості ґрунту)
-#define PUMP_PIN        23     // Пін, до якого підключено реле водяного насоса
-#define LED_PIN         2      // Пін вбудованого світлодіода (блимає, коли система працює)
+#define NUM_ZONES       4      
+#define PUMP_PIN        23     
+#define LED_PIN         2      
 
-// --- ⏱ ТАЙМІНГИ (значення в мілісекундах: 1000 мс = 1 сек) ---
+// 👇 НОВЕ: Налаштування Ультразвукового датчика (AJ-SR04M)
+#define TRIG_PIN 25        // Пін для посилу сигналу
+#define ECHO_PIN 26        // Пін для прийому відлуння
 
-#define VALVE_OPEN_DELAY 5000      // Пауза після відкриття електроклапана перед запуском насоса
-#define VALVE_CLOSE_DELAY 2000     // Пауза після вимкнення насоса перед закриттям клапана
-#define QUEUE_DELAY      5000      // Час між поливом різних зон
-#define SENSOR_VERIFY_TIME 30000   // Час контрольного заміру
+// 👇 НОВЕ: Калібрування бака (в сантиметрах)
+#define TANK_HEIGHT  100   // Відстань від датчика до дна (0%)
+#define FULL_DIST    10    // Відстань від датчика до води, коли повно (100%)
+#define MIN_WATER_LEVEL 10 // Критичний рівень води у %, нижче якого насос не вмикається
 
-#define STARTUP_REPORT_DELAY 60000 // Пауза при старті системи
-#define REPORT_INTERVAL     3600000  // Інтервал відправки даних у Телеграм
+// 👇 НОВЕ: Адреса датчика BME280 (зазвичай 0x76 або 0x77)
+#define BME_INNER_ADDR 0x76 
 
-#define SAMPLE_INTERVAL 1000       // Частота опитування датчиків
-#define LCD_INTERVAL    20000       // Частота оновлення дисплея
+// --- ⏱ ТАЙМІНГИ ---
+#define VALVE_OPEN_DELAY 5000      
+#define VALVE_CLOSE_DELAY 2000     
+#define QUEUE_DELAY      5000      
+#define SENSOR_VERIFY_TIME 30000   
+#define STARTUP_REPORT_DELAY 60000 
+#define REPORT_INTERVAL     3600000  
+#define SAMPLE_INTERVAL 1000       
+#define LCD_INTERVAL    3000       // Змінив на 3000, щоб екрани не мигтіли занадто швидко (було 20000 - це задовго)
 
 struct Zone {
-  char name[30];         // ⚠️ ЗМІНЕНО: String -> char[30] (для збереження в пам'ять)
+  char name[30];         
   int sensorPin;         
   int relayPin;          
   int min;               
@@ -48,17 +55,23 @@ struct Zone {
   int wetVal;            
   unsigned long wateringTime; 
   unsigned long soakingTime;  
-  int topicID;
-  char lastWaterTime[6]; // 🆕 НОВЕ: час останнього поливу (наприклад "12:30")
-         
+  int topicID;           
+  char lastWaterTime[6]; 
+  
+  // 👇 НОВЕ: Чи активна зона? (true = працює, false = вимкнена)
+  bool enabled; 
 };
 
 extern Zone zones[NUM_ZONES];
 
-// 👇 НОВІ ФУНКЦІЇ ДЛЯ ПАМ'ЯТІ
 void saveSettings();
 void loadSettings();
 
 enum SystemMode { MODE_AUTO, MODE_MANUAL };
 extern SystemMode currentSystemMode;
-bool isPumpActive();
+
+bool isPumpActive(); 
+// 👇 НОВІ ПРОТОТИПИ ФУНКЦІЙ
+bool isWaterAvailable();
+int getWaterLevelPercent(); 
+void setZoneEnable(int i, bool state); // Функція вмикання/вимикання зони

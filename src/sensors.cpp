@@ -104,14 +104,22 @@ void updateLcdLoop() {
       lcd.setCursor(13, 0);
       lcd.print("[" + String(modeChar) + "]");
       
-      lcd.setCursor(0, 1);
-      lcd.print("M:" + String(getPercent(i)) + "% ");
-      
-      String vStatus = (digitalRead(zones[i].relayPin) == LOW) ? "ON " : "OFF";
-      lcd.print("V:" + vStatus);
-      
-      String pStatus = isPumpActive() ? "ON" : "OF";
-      lcd.print("P:" + pStatus);
+      // 👇 ЗМІНА ТУТ: Перевіряємо, чи увімкнена зона
+      if (!zones[i].enabled) {
+         // ЯКЩО ВИМКНЕНА
+         lcd.setCursor(0, 1);
+         lcd.print("  ZONE DISABLED "); 
+      } else {
+         // ЯКЩО УВІМКНЕНА (Твій старий код)
+         lcd.setCursor(0, 1);
+         lcd.print("M:" + String(getPercent(i)) + "% ");
+         
+         String vStatus = (digitalRead(zones[i].relayPin) == LOW) ? "ON " : "OFF";
+         lcd.print("V:" + vStatus);
+         
+         String pStatus = isPumpActive() ? "ON" : "OF";
+         lcd.print("P:" + pStatus);
+      }
     } 
     // --- ЕКРАН КЛІМАТУ (4) ---
     else if (screen == 4) { 
@@ -129,12 +137,10 @@ void updateLcdLoop() {
       lcd.setCursor(0, 1);
       lcd.print("3:" + String(zones[2].lastWaterTime) + " 4:" + String(zones[3].lastWaterTime));
     }
-    // --- ЕКРАН WIFI (6) - ВИПРАВЛЕНО ---
+    // --- ЕКРАН WIFI (6) ---
     else if (screen == 6) {
-      // 👇 Використовуємо буфер для чистого тексту (це прибере "сміття" на екрані)
       char buf[17]; 
 
-      // 1. Рахуємо WiFi
       int rssi = WiFi.RSSI();
       int qual = 0;
       if (rssi <= -100) qual = 0;
@@ -142,18 +148,15 @@ void updateLcdLoop() {
       else qual = 2 * (rssi + 100);
       
       lcd.setCursor(0, 0);
-      // Форматуємо рядок типу "WiFi: 86% -55dB"
       snprintf(buf, 17, "WiFi:%d%% %ddB", qual, rssi);
       lcd.print(buf);
 
-      // 2. Рахуємо Uptime (локально, щоб не залежати від інших файлів)
       unsigned long ms = millis();
       unsigned long days = ms / 86400000;
       unsigned long hours = (ms % 86400000) / 3600000;
       unsigned long mins = (ms % 3600000) / 60000;
       
       lcd.setCursor(0, 1);
-      // Форматуємо рядок типу "Up: 1d 04h 25m"
       snprintf(buf, 17, "Up: %lud %02luh %02lum", days, hours, mins);
       lcd.print(buf);
     }
@@ -164,7 +167,6 @@ void updateLcdLoop() {
   // Оновлення рухомого рядка
   if (millis() - lastMarqueeUpdate > 300) {
     lastMarqueeUpdate = millis();
-    // Оновлюємо тільки якщо на екрані зона (щоб не псувати інші екрани)
     int currentDisplayedZone = (screen == 0) ? 6 : screen - 1;
 
     if (currentDisplayedZone < NUM_ZONES) {
