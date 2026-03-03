@@ -19,6 +19,16 @@ unsigned long lastSampleTime = 0;
 unsigned long lastLcdTime = 0;
 int currentZoneDisp = 0;
 
+// 👇 НОВЕ: Глобальні змінні для режиму калібрування
+bool isCalibratingActive = false;
+bool calibZones[NUM_ZONES] = {false, false, false, false};
+unsigned long calibSum[NUM_ZONES] = {0, 0, 0, 0};
+unsigned int calibCount = 0;
+unsigned long calibDurationMs = 0;
+unsigned long calibStartTime = 0;
+unsigned long lastCalibTick = 0;
+// 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
 // 👇 Функція для рухомого рядка
 String getMarqueeText(String text, int width) {
   if (text.length() <= width) return text;
@@ -27,6 +37,28 @@ String getMarqueeText(String text, int width) {
   String result = displayString.substring(offset) + displayString.substring(0, offset);
   return result.substring(0, width);
 }
+
+// 👇 НОВЕ: Функція запуску калібрування (викликається з Телеграму)
+void startCalibrationRoutine(bool* selected, int minutes) {
+  isCalibratingActive = true;
+  calibDurationMs = minutes * 60000UL; // Переводимо хвилини в мілісекунди
+  calibStartTime = millis();
+  lastCalibTick = millis();
+  calibCount = 0;
+  
+  for(int i=0; i<NUM_ZONES; i++) {
+    calibZones[i] = selected[i];
+    calibSum[i] = 0; // Скидаємо суматори
+  }
+}
+
+// Функція для перевірки, чи зона зараз на калібруванні
+bool isZoneCalibrating(int zoneIndex) {
+  if (!isCalibratingActive) return false;
+  return calibZones[zoneIndex];
+}
+// 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
 
 void setupSensors() {
   lcd.init(); lcd.backlight();
@@ -48,6 +80,38 @@ int getPercent(int i) {
 }
 
 void updateSensorsLoop() {
+  // 👇 НОВЕ: Логіка збору даних для калібрування (1 раз на секунду)
+  if (isCalibratingActive) {
+    if (millis() - lastCalibTick >= 1000) {
+      lastCalibTick = millis();
+      for (int i = 0; i < NUM_ZONES; i++) {
+        if (calibZones[i]) {
+          // Читаємо СИРЕ значення (RAW), бо саме воно потрібне для калібрування
+          calibSum[i] += analogRead(zones[i].sensorPin); 
+        }
+      }
+      calibCount++;
+
+      // Перевіряємо, чи закінчився час тесту
+      if (millis() - calibStartTime >= calibDurationMs) {
+        isCalibratingActive = false; // Вимикаємо режим калібрування
+        
+        // Формуємо красивий звіт для Телеграму
+        String report = "✅ <b>Калібрування завершено!</b>\n\n";
+        for (int i = 0; i < NUM_ZONES; i++) {
+          if (calibZones[i] && calibCount > 0) {
+            unsigned long avgRaw = calibSum[i] / calibCount;
+            report += "🌱 Зона " + String(i + 1) + " (" + String(zones[i].name) + "):\n";
+            report += "Середнє RAW значення: <b>" + String(avgRaw) + "</b>\n\n";
+          }
+        }
+        report += "<i>Використовуйте ці значення для налаштування dryVal (сухо) або wetVal (вода).</i>";
+        sendTelegramMessage(TOPIC_SERVICE, report);
+      }
+    }
+  }
+  // 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
   if (millis() - lastSampleTime > sampleInterval) { // 🔄 Змінено
     lastSampleTime = millis();
     for (int i = 0; i < NUM_ZONES; i++) sumH[i] += getPercent(i);

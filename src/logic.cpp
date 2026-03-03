@@ -123,6 +123,13 @@ void updateWateringLogic() {
         continue; 
     }
 
+    // 👇 НОВЕ: ЯКЩО ЗОНА КАЛІБРУЄТЬСЯ - ПРОПУСКАЄМО ЇЇ
+    if (isZoneCalibrating(i)) {
+        zoneStates[i] = STATE_IDLE; 
+        continue; 
+    }
+    // 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
     int moisture = getPercent(i);
 
     switch (zoneStates[i]) {
@@ -226,6 +233,13 @@ void forceZoneStart(int i) {
       sendTelegramMessage(TOPIC_MAIN, "⛔ <b>Помилка:</b> Зона " + String(i+1) + " вимкнена в налаштуваннях!");
       return;
   }
+
+  // 👇 НОВЕ: ЗАБОРОНЯЄМО РУЧНИЙ ПУСК, ЯКЩО ЗОНА КАЛІБРУЄТЬСЯ
+  if (isZoneCalibrating(i)) {
+      sendTelegramMessage(TOPIC_MAIN, "⛔ <b>Помилка:</b> Зона " + String(i+1) + " зараз калібрується!");
+      return;
+  }
+  // 👆 КІНЕЦЬ НОВОГО БЛОКУ
   
   // 👇 ПЕРЕВІРКА ВОДИ
   if (!isWaterAvailable()) {

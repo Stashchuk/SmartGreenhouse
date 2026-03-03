@@ -11,9 +11,16 @@
 enum BotState { 
   IDLE, SET_NAME, SET_MIN, SET_MAX,
   SET_T_OPEN, SET_T_CLOSE, SET_T_QUEUE, SET_T_VERIFY,
-  SET_T_REPORT, SET_T_LCD
+  SET_T_REPORT, SET_T_LCD,
+  CALIB_SELECT_ZONES // 👇 НОВЕ: Стан для вибору зон калібрування
 };
 BotState currentState = IDLE;
+
+// 👇 НОВЕ: Змінні для збереження вибраних зон та декларація функції
+bool selectedForCalib[10] = {false}; 
+extern void startCalibrationRoutine(bool* zones, int minutes); // Саму функцію ми напишемо в наступному кроці!
+// 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
 int targetZone = -1; 
 
 WiFiClientSecure client;      
@@ -137,6 +144,39 @@ void handleMessages(int numNewMessages) {
     if (type == "message" && currentState != IDLE) {
       unsigned long val = text.toInt();
       bool done = false;
+
+      // 👇 НОВЕ: Обробка тексту з номерами зон для калібрування
+      if (currentState == CALIB_SELECT_ZONES) {
+        text.toLowerCase();
+        for(int k=0; k<NUM_ZONES; k++) selectedForCalib[k] = false; // Очищуємо старий вибір
+        
+        if (text.indexOf("всі") >= 0 || text.indexOf("все") >= 0 || text.indexOf("all") >= 0) {
+           for(int k=0; k<NUM_ZONES; k++) selectedForCalib[k] = true;
+        } else {
+           if (text.indexOf("1") >= 0) selectedForCalib[0] = true;
+           if (text.indexOf("2") >= 0) selectedForCalib[1] = true;
+           if (text.indexOf("3") >= 0) selectedForCalib[2] = true;
+           if (text.indexOf("4") >= 0) selectedForCalib[3] = true;
+        }
+        
+        bool anySelected = false;
+        for(int k=0; k<NUM_ZONES; k++) if(selectedForCalib[k]) anySelected = true;
+        
+        if (anySelected) {
+           currentState = IDLE; 
+           String kb = "[";
+           kb += "[{\"text\":\"5 хв\",\"callback_data\":\"calib_time_5\"},{\"text\":\"10 хв\",\"callback_data\":\"calib_time_10\"}],";
+           kb += "[{\"text\":\"20 хв\",\"callback_data\":\"calib_time_20\"},{\"text\":\"30 хв\",\"callback_data\":\"calib_time_30\"}],";
+           kb += "[{\"text\":\"60 хв\",\"callback_data\":\"calib_time_60\"},{\"text\":\"❌ Скасувати\",\"callback_data\":\"settings_main\"}]";
+           kb += "]";
+           bot.sendMessageWithInlineKeyboard(chat_id, "⏱ Оберіть час заміру:", "", kb);
+        } else {
+           bot.sendMessage(chat_id, "⚠️ Зони не розпізнано. Спробуйте ще раз (наприклад: 1, 2 або 'всі'):", "");
+        }
+        continue; // Завершуємо обробку цього повідомлення, щоб воно не пішло далі
+      }
+      // 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
       // Налаштування зони - працює ЗАВЖДИ
       if (targetZone != -1) {
         if (currentState == SET_NAME) { text.toCharArray(zones[targetZone].name, 30); done = true; }
@@ -187,6 +227,11 @@ void handleMessages(int numNewMessages) {
          String kb = "[";
          kb += "[{\"text\": \"" + String(currentSystemMode==MODE_AUTO?"🔄 В РУЧНИЙ":"🔄 В АВТО") + "\", \"callback_data\": \"toggle_mode\"}],";
          kb += "[{\"text\": \"⏱ ТАЙМІНГИ\", \"callback_data\": \"settings_time\"}],";
+         
+         // 👇 НОВЕ: Кнопка "КАЛІБРУВАННЯ" у головному меню налаштувань
+         kb += "[{\"text\": \"🎛 КАЛІБРУВАННЯ\", \"callback_data\": \"start_calib\"}],";
+         // 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
          for (int j = 0; j < NUM_ZONES; j++) kb += "[{\"text\": \"⚙️ " + String(zones[j].name) + "\", \"callback_data\": \"edit_z" + String(j) + "\"}],";
          kb += "[{\"text\": \"⬅️ Назад\", \"callback_data\": \"main_menu\"}]]";
          bot.sendMessageWithInlineKeyboard(chat_id, "Налаштування:", "HTML", kb);
@@ -225,6 +270,24 @@ void handleMessages(int numNewMessages) {
        else if (q == "t_report") { currentState = SET_T_REPORT; bot.sendMessage(chat_id, "Інтервал звітів (мс):", ""); }
        else if (q == "t_lcd")    { currentState = SET_T_LCD; bot.sendMessage(chat_id, "Швидкість LCD (мс):", ""); }
        else if (q == "main_menu") gotoMainMenu(chat_id);
+       
+       // 👇 НОВЕ: Обробка натискань меню Калібрування
+       else if (q == "start_calib") {
+         currentState = CALIB_SELECT_ZONES;
+         bot.sendMessage(chat_id, "Введіть номери зон для калібрування (наприклад: 1, 3 або 1 2 3 або 'всі'):", "");
+       }
+       else if (q.startsWith("calib_time_")) {
+         int mins = q.substring(11).toInt();
+         String zonesStr = "";
+         for(int k=0; k<NUM_ZONES; k++) if(selectedForCalib[k]) zonesStr += String(k+1) + " ";
+         
+         bot.sendMessage(chat_id, "⏳ <b>Запущено калібрування!</b>\nЗони: " + zonesStr + "\nЧас: " + String(mins) + " хв.", "HTML");
+         sendTelegramMessage(TOPIC_SERVICE, "⏳ Запущено калібрування зон [" + zonesStr + "] на " + String(mins) + " хвилин...");
+         
+         startCalibrationRoutine(selectedForCalib, mins); // Викликаємо запуск!
+       }
+       // 👆 КІНЕЦЬ НОВОГО БЛОКУ
+
        bot.answerCallbackQuery(bot.messages[i].query_id, "");
     }
   }
