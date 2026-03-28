@@ -42,7 +42,7 @@ void setup() {
       ArduinoOTA.begin();
       
       Serial.println("OTA Ready");
-      sendTelegramMessage(TOPIC_SERVICE, "✅ <b>Система запущена!!!</b>\nOTA Ready\nWi-Fi OK with IP: " + WiFi.localIP().toString());
+      sendTelegramMessage(TOPIC_SERVICE, "✅ <b>Система запущена!!!</b>\nWi-Fi name: " + String(ssid) + "\nWi-Fi OK with IP: " + WiFi.localIP().toString());
       lcdPrintStatus("WiFi OK!");
   } else {
       lcdPrintStatus("WiFi ERROR");
