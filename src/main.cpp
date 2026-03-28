@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <ArduinoOTA.h> // 👇 НОВЕ: Бібліотека для прошивки по Wi-Fi
+#include <ArduinoOTA.h> 
 #include "config.h"
 #include "network.h"
 #include "sensors.h"
@@ -8,12 +8,12 @@
 #include "mqtt_logic.h" 
 
 unsigned long lastTelegramTime = 0;
+unsigned long lastBotCheck = 0; // 👇 ДОДАНО: Таймер для Telegram
 bool startupReportSent = false;
 
 void setup() {
   Serial.begin(115200);
   
-  // 👇 НОВЕ: Ініціалізація пінів датчика рівня води (AJ-SR04M)
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   digitalWrite(TRIG_PIN, LOW);
@@ -31,11 +31,8 @@ void setup() {
   setupMQTT(); 
 
   if (WiFi.status() == WL_CONNECTED) {
-      sendTelegramMessage(TOPIC_SERVICE, "✅ <b>Система запущена по Wi-Fi !</b>\nWiFi: OK");
-      lcdPrintStatus("WiFi OK!");
-
-      // 👇 НОВЕ: Налаштування та запуск OTA (оновлення по повітрю)
-      ArduinoOTA.setHostname("SmartGarden-ESP32"); // Так плата буде називатися в мережі
+      // 👇 OTA налаштовується ТІЛЬКИ якщо є Wi-Fi
+      ArduinoOTA.setHostname("SmartGarden-ESP32"); 
       ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
       ArduinoOTA.onEnd([]() { Serial.println("\nOTA End"); });
       ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
@@ -43,31 +40,37 @@ void setup() {
       });
       ArduinoOTA.onError([](ota_error_t error) { Serial.printf("OTA Error[%u]\n", error); });
       ArduinoOTA.begin();
+      
       Serial.println("OTA Ready");
-      // 👆 КІНЕЦЬ НОВОГО БЛОКУ
-
+      sendTelegramMessage(TOPIC_SERVICE, "✅ <b>Система запущена!!!</b>\nOTA Ready\nWi-Fi OK with IP: " + WiFi.localIP().toString());
+      lcdPrintStatus("WiFi OK!");
   } else {
       lcdPrintStatus("WiFi ERROR");
   }
 }
 
 void loop() {
-  ArduinoOTA.handle(); // 👇 НОВЕ: Слухаємо, чи не летить нова прошивка
+  // 1. Пріоритет №1 — перевірка прошивки
+  ArduinoOTA.handle(); 
 
   checkWiFiConnection();
-  handleTelegram(); 
+
+  // 2. Опитуємо Telegram раз на 2 секунди, щоб не "душити" Wi-Fi
+  if (millis() - lastBotCheck > 2000) {
+    handleTelegram(); 
+    lastBotCheck = millis();
+  }
+
   updateWateringLogic();
   updateSensorsLoop();
   updateLcdLoop();
   updateMQTTLoop(); 
 
-  // 🔄 Змінено: використовуємо змінну reportInterval замість константи
   if (millis() - lastTelegramTime > reportInterval) {
     lastTelegramTime = millis();
     sendReport(false); 
   }
   
-  // 🔄 Змінено: використовуємо змінну startupReportDelay замість константи
   if (!startupReportSent && millis() > startupReportDelay) {
     sendReport(true); 
     startupReportSent = true; 

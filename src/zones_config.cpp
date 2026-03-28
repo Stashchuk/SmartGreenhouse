@@ -19,8 +19,8 @@ unsigned long lcdInterval        = DEF_LCD_INTERVAL;
 // ==========================================
 // 🔐 ТУТ ЖИВУТЬ ПАРОЛІ ТА НАЛАШТУВАННЯ
 // ==========================================
-const char* ssid      = "Stashchuk";                                      
-const char* password  = "Jeka-8802";                                      
+const char* ssid      = "Galaxy";                                      
+const char* password  = "11111111";                                      
 const char* BOTtoken  = "8581633125:AAECXGuCUpU7WdC2QQH5VeXxKfykXf1yX-w"; 
 const char* CHAT_ID   = "-1003759921586"; // ID ГРУПИ (куди йдуть звіти)
 
