@@ -19,8 +19,8 @@ unsigned long lcdInterval        = DEF_LCD_INTERVAL;
 // ==========================================
 // 🔐 ТУТ ЖИВУТЬ ПАРОЛІ ТА НАЛАШТУВАННЯ
 // ==========================================
-const char* ssid      = "TP-Link_003B";                                      
-const char* password  = "59374121";                                      
+const char* ssid      = "Green";                                      
+const char* password  = "132546578";                                      
 const char* BOTtoken  = "8581633125:AAECXGuCUpU7WdC2QQH5VeXxKfykXf1yX-w"; 
 const char* CHAT_ID   = "-1003759921586"; // ID ГРУПИ (куди йдуть звіти)
 

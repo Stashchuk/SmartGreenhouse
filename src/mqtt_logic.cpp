@@ -3,6 +3,8 @@
 #include "config.h" 
 #include "sensors.h"
 
+void publishSensorData(); // <--- ДОДАЙ ЦЕЙ РЯДОК ТУТ
+
 // -----------------------------------------------------------
 // НАЛАШТУВАННЯ СЕРВЕРА (RAILWAY)
 // -----------------------------------------------------------
@@ -20,10 +22,11 @@ PubSubClient mqtt(espClient);
 
 //інтервал передачі на графики
 unsigned long lastMqttPublish = 0;
-#define MQTT_INTERVAL 50000
+#define MQTT_INTERVAL 20000
 
 void setupMQTT() {
   mqtt.setServer(mqtt_server, mqtt_port);
+  mqtt.setKeepAlive(60); // <--- ДОДАТИ: Сервер чекатиме 60 секунд замість 15
 }
 
 void reconnect() {
@@ -39,6 +42,7 @@ void reconnect() {
     // Підключення (без логіна/пароля)
     if (mqtt.connect(clientId.c_str())) {
       Serial.println("connected! 🚀");
+      publishSensorData(); // <--- ДОДАТИ: Відправити свіжі цифри в ту саму секунду!
     } else {
       Serial.print("failed, rc=");
       Serial.print(mqtt.state());

@@ -56,7 +56,7 @@ void loop() {
   checkWiFiConnection();
 
   // 2. Опитуємо Telegram раз на 2 секунди, щоб не "душити" Wi-Fi
-  if (millis() - lastBotCheck > 2000) {
+  if (millis() - lastBotCheck > 5000) {
     handleTelegram(); 
     lastBotCheck = millis();
   }
