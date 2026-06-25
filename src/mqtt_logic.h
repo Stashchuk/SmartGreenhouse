@@ -3,4 +3,6 @@
 
 void setupMQTT();
 void updateMQTTLoop();
-void publishSensorData(); // Функція відправки даних
+
+void publishSensorData();
+void publishAppState();

@@ -20,24 +20,33 @@ extern const int numAdmins;
 // ⚙️ НАЛАШТУВАННЯ ОБЛАДНАННЯ
 // ==========================================
 #define NUM_ZONES       4      
+
+// Насос поливу, який уже був у твоєму коді
 #define PUMP_PIN        23     
+
+// НОВИЙ насос набору води.
+// Я поставив GPIO27 як стартовий варіант.
+// Якщо фізично підключиш реле на інший пін — зміни тільки це число.
+#define FILL_PUMP_PIN   27     
+
 #define LED_PIN         2      
 
-// 👇 НОВЕ: Налаштування Ультразвукового датчика (AJ-SR04M)
+// Ультразвуковий датчик рівня води AJ-SR04M
 #define TRIG_PIN 25        // Пін для посилу сигналу
 #define ECHO_PIN 26        // Пін для прийому відлуння
 
-// 👇 НОВЕ: Калібрування бака (в сантиметрах)
-#define TANK_HEIGHT  100   // Відстань від датчика до дна (0%)
-#define FULL_DIST    10    // Відстань від датчика до води, коли повно (100%)
+// Калібрування бака, см
+#define TANK_HEIGHT  100   // Відстань від датчика до дна, 0%
+#define FULL_DIST    10    // Відстань від датчика до води, коли повно, 100%
 #define MIN_WATER_LEVEL 10 // Критичний рівень води у %, нижче якого насос не вмикається
 
-// 👇 НОВЕ: Адреса датчика BME280 (зазвичай 0x76 або 0x77)
+// BME280
 #define BME_INNER_ADDR 0x76 
 
-// --- ⏱ ТАЙМІНГИ (Змінено на змінні для налаштування) ---
+// MQTT топіки для нового Android-додатку
+#define MQTT_APP_PREFIX "smartgreenhouse"
 
-// 1. Дефолтні значення (використовуються при першому запуску або скиданні)
+// --- ⏱ ТАЙМІНГИ ---
 #define DEF_VALVE_OPEN_DELAY 5000      
 #define DEF_VALVE_CLOSE_DELAY 2000     
 #define DEF_QUEUE_DELAY      5000      
@@ -47,7 +56,6 @@ extern const int numAdmins;
 #define DEF_SAMPLE_INTERVAL  1000       
 #define DEF_LCD_INTERVAL     3000       
 
-// 2. Глобальні змінні (тепер їх можна змінювати через Telegram)
 extern unsigned long valveOpenDelay;
 extern unsigned long valveCloseDelay;
 extern unsigned long queueDelay;
@@ -69,8 +77,6 @@ struct Zone {
   unsigned long soakingTime;  
   int topicID;           
   char lastWaterTime[6]; 
-  
-  // 👇 НОВЕ: Чи активна зона? (true = працює, false = вимкнена)
   bool enabled; 
 };
 
@@ -83,7 +89,19 @@ enum SystemMode { MODE_AUTO, MODE_MANUAL };
 extern SystemMode currentSystemMode;
 
 bool isPumpActive(); 
-// 👇 НОВІ ПРОТОТИПИ ФУНКЦІЙ
+bool isFillPumpActive();
+bool isIrrigationPumpManualActive();
+
 bool isWaterAvailable();
 int getWaterLevelPercent(); 
-void setZoneEnable(int i, bool state); // Функція вмикання/вимикання зони
+
+void setZoneEnable(int i, bool state);
+
+void setFillPumpManual(bool state);
+void setIrrigationPumpManual(bool state);
+
+void openValveManual(int i);
+void closeValveManual(int i);
+void closeAllValvesManual();
+
+bool isZoneValveOpen(int i);
